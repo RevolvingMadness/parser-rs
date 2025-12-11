@@ -433,7 +433,7 @@ where
         C: Default + Accumulate<T>,
     {
         move |input: &mut Stream<'a>| {
-            let mut collection: Option<C> = None;
+            let mut collection = C::default();
 
             loop {
                 let start = input.position;
@@ -443,11 +443,7 @@ where
                             break;
                         }
 
-                        if collection.is_none() {
-                            collection = Some(C::default());
-                        }
-
-                        collection.as_mut().unwrap().accumulate(val);
+                        collection.accumulate(val);
                     }
                     None => {
                         if input.position != start {
@@ -459,7 +455,7 @@ where
                 }
             }
 
-            Some(collection.unwrap_or_default())
+            Some(collection)
         }
     }
 
