@@ -312,13 +312,13 @@ impl<'a> Stream<'a> {
 
     #[inline]
     #[must_use]
-    pub fn slice(&self, start: usize, end: usize) -> &str {
+    pub fn slice(&self, start: usize, end: usize) -> &'a str {
         &self.input[start..end]
     }
 
     #[inline]
     #[must_use]
-    pub fn slice_from(&self, start: usize) -> &str {
+    pub fn slice_from(&self, start: usize) -> &'a str {
         self.slice(start, self.position)
     }
 
@@ -413,6 +413,17 @@ where
 
                     Some(None)
                 }
+            }
+        }
+    }
+
+    fn sliced(mut self) -> impl FnParser<'a, &'a str> {
+        move |input: &mut Stream<'a>| {
+            let start = input.position;
+
+            match self.parse(input) {
+                Some(_) => Some(input.slice_from(start)),
+                None => None,
             }
         }
     }

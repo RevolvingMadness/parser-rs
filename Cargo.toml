@@ -24,3 +24,6 @@ harness = false
 [[bench]]
 name = "digits"
 harness = false
+
+[[example]]
+name = "json"
