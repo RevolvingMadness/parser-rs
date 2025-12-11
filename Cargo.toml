@@ -2,6 +2,12 @@
 name = "parser-rs"
 version = "0.0.1"
 edition = "2024"
+license = "Apache-2.0"
+description = "A functional/imperative style parsing library."
+repository = "https://github.com/RevolvingMadness/parser-rs"
+readme = "README.md"
+keywords = ["parser", "parsing", "functional", "imperative", "combinator"]
+categories = ["parsing"]
 
 [dependencies]
 
