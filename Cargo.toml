@@ -1,0 +1,26 @@
+[package]
+name = "parser-rs"
+version = "0.0.1"
+edition = "2024"
+
+[dependencies]
+
+[dev-dependencies]
+criterion = "0.8.0"
+chumsky = "0.11.2"
+
+[[bench]]
+name = "choice"
+harness = false
+
+[[bench]]
+name = "char"
+harness = false
+
+[[bench]]
+name = "literal"
+harness = false
+
+[[bench]]
+name = "digits"
+harness = false
