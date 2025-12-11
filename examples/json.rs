@@ -1,4 +1,4 @@
-use parser_rs::{char, choice, digits, end_of_file, literal, take_while, FnParser, Stream};
+use parser_rs::{FnParser, Stream, char, choice, digits, end_of_file, literal, take_while};
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 

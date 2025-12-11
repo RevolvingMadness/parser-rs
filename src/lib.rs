@@ -421,10 +421,7 @@ where
         move |input: &mut Stream<'a>| {
             let start = input.position;
 
-            match self.parse(input) {
-                Some(_) => Some(input.slice_from(start)),
-                None => None,
-            }
+            self.parse(input).map(|_| input.slice_from(start))
         }
     }
 

@@ -1,8 +1,8 @@
 use chumsky::error::Rich;
 use chumsky::primitive::just;
-use chumsky::{extra, Parser};
-use criterion::{criterion_group, criterion_main, Criterion};
-use parser_rs::{literal, FnParser, Stream};
+use chumsky::{Parser, extra};
+use criterion::{Criterion, criterion_group, criterion_main};
+use parser_rs::{FnParser, Stream, literal};
 use std::hint::black_box;
 
 fn criterion_benchmark(c: &mut Criterion) {

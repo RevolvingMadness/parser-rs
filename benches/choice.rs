@@ -1,8 +1,8 @@
 use chumsky::error::Rich;
 use chumsky::primitive::{choice as chumsky_choice, just};
-use chumsky::{extra, Parser};
-use criterion::{criterion_group, criterion_main, Criterion};
-use parser_rs::{char, choice as parser_rs_choice, FnParser, Stream};
+use chumsky::{Parser, extra};
+use criterion::{Criterion, criterion_group, criterion_main};
+use parser_rs::{FnParser, Stream, char, choice as parser_rs_choice};
 use std::hint::black_box;
 
 fn parser_rs_parser(input: &mut Stream) -> Option<()> {
