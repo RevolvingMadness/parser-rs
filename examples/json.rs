@@ -1,6 +1,7 @@
-use parser_rs::{FnParser, Stream, char, choice, digits, end_of_file, literal, take_while};
+use parser_rs::{
+    char, choice, digits, end_of_file, literal, take_while, FnParser, ParserRange, Stream,
+};
 use std::collections::{HashMap, HashSet};
-use std::ops::Range;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum JsonValue {
@@ -133,7 +134,7 @@ fn parse_object<'a>(input: &mut Stream<'a>) -> Option<JsonValue> {
     let items_parser = kv_pair_parser.separated_by_trailing(padded(char(',')));
 
     char('{').parse(input)?;
-    let items: Vec<((Range<usize>, String), JsonValue)> = padded(items_parser).parse(input)?;
+    let items: Vec<((ParserRange, String), JsonValue)> = padded(items_parser).parse(input)?;
     char('}').parse(input)?;
 
     let mut object = HashMap::new();

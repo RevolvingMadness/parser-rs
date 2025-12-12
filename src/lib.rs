@@ -1,13 +1,89 @@
 use crate::accumulate::Accumulate;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 use std::ops::Range;
 
 pub mod accumulate;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+#[repr(u8)]
+pub enum SemanticTokenKind {
+    Namespace,
+    Class,
+    Enum,
+    Interface,
+    Struct,
+    TypeParameter,
+    Type,
+    Parameter,
+    Variable,
+    Property,
+    EnumMember,
+    Decorator,
+    Event,
+    Function,
+    Method,
+    Macro,
+    Comment,
+    String,
+    Keyword,
+    Number,
+    RegularExpression,
+    Operator,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub struct SemanticToken {
+    pub range: ParserRange,
+    pub kind: SemanticTokenKind,
+}
+
+impl SemanticToken {
+    pub fn length(&self) -> usize {
+        self.range.end - self.range.start
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, Default)]
 pub struct ParserRange {
-    start: usize,
-    end: usize,
+    pub start: usize,
+    pub end: usize,
+}
+
+impl Display for ParserRange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}..{}", self.start, self.end)
+    }
+}
+
+impl Debug for ParserRange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}..{}", self.start, self.end)
+    }
+}
+
+impl From<Range<usize>> for ParserRange {
+    fn from(range: Range<usize>) -> ParserRange {
+        ParserRange {
+            start: range.start,
+            end: range.end,
+        }
+    }
+}
+
+impl From<ParserRange> for Range<usize> {
+    fn from(range: ParserRange) -> Range<usize> {
+        range.start..range.end
+    }
+}
+
+impl ParserRange {
+    pub fn into_range(self) -> Range<usize> {
+        self.into()
+    }
+
+    pub fn overlaps(&self, other: ParserRange) -> bool {
+        self.start < other.end && other.start < self.end
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -25,20 +101,20 @@ pub enum Expectation {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParseError {
-    pub span: Range<usize>,
+    pub span: ParserRange,
     pub messages: Vec<&'static str>,
     pub expected: Vec<Expectation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Suggestion {
-    pub range: Range<usize>,
+    pub range: ParserRange,
     pub expected: Expectation,
 }
 
 #[derive(Debug, Clone)]
 pub struct ValidationError {
-    pub span: Range<usize>,
+    pub span: ParserRange,
     pub message: &'static str,
 }
 
@@ -75,6 +151,9 @@ pub struct Stream<'a> {
     pub validation_errors: Vec<ValidationError>,
     pub can_suggest_at_position: bool,
     pub force_suggest_range: Option<ParserRange>,
+    pub semantic_tokens: Vec<SemanticToken>,
+    pub semantic_tokens_range: Option<ParserRange>,
+    pub semantic_tokens_enabled: bool,
     pub max_validation_errors: usize,
     pub validation_errors_enabled: bool,
 }
@@ -91,9 +170,9 @@ impl<'a> Stream<'a> {
             position: 0,
             cursor: completion_target,
             max_error: ParseError {
-                span: 0..1,
-                messages: vec![],
-                expected: vec![],
+                span: ParserRange { start: 0, end: 1 },
+                messages: Vec::new(),
+                expected: Vec::new(),
             },
             suggestions: Vec::new(),
             validation_errors: Vec::new(),
@@ -101,6 +180,32 @@ impl<'a> Stream<'a> {
             force_suggest_range: None,
             max_validation_errors: max_validation_errors.unwrap_or(0),
             validation_errors_enabled: max_validation_errors.is_some(),
+            semantic_tokens_enabled: false,
+            semantic_tokens: Vec::new(),
+            semantic_tokens_range: None,
+        }
+    }
+
+    pub fn add_syntax_from(&mut self, start: usize, kind: SemanticTokenKind) {
+        if !self.semantic_tokens_enabled {
+            return;
+        }
+
+        let token_range = ParserRange {
+            start,
+            end: self.position,
+        };
+
+        let should_add = match &self.semantic_tokens_range {
+            Some(request_range) => token_range.overlaps(*request_range),
+            None => true,
+        };
+
+        if should_add {
+            self.semantic_tokens.push(SemanticToken {
+                range: token_range,
+                kind,
+            });
         }
     }
 
@@ -214,19 +319,21 @@ impl<'a> Stream<'a> {
 
     #[inline]
     pub fn add_suggestion(&mut self, start_position: usize, expectation: &Expectation) {
-        self.add_suggestion_range(start_position..start_position + 1, expectation);
+        self.add_suggestion_range(
+            ParserRange {
+                start: start_position,
+                end: start_position + 1,
+            },
+            expectation,
+        );
     }
 
-    pub fn add_suggestion_range(&mut self, range: Range<usize>, expectation: &Expectation) {
-        let error_position = range.start;
-        if error_position > self.max_error.span.start {
-            self.max_error.span = error_position..error_position + 1;
-            self.max_error.messages.clear();
-            self.max_error.expected.clear();
-            self.max_error.expected.push(*expectation);
-        } else if error_position == self.max_error.span.start {
-            self.max_error.expected.push(*expectation);
-        }
+    pub fn add_suggestion_range<R: Into<ParserRange>>(
+        &mut self,
+        range: R,
+        expectation: &Expectation,
+    ) {
+        let range = range.into();
 
         if self.can_suggest_at_position
             && let Some(cursor) = self.cursor
@@ -236,7 +343,10 @@ impl<'a> Stream<'a> {
                 && cursor <= force_suggest_range.end
             {
                 self.suggestions.push(Suggestion {
-                    range: cursor..(cursor + (range.end - range.start)),
+                    range: ParserRange {
+                        start: cursor,
+                        end: cursor + (range.end - range.start),
+                    },
                     expected: *expectation,
                 });
 
@@ -258,15 +368,21 @@ impl<'a> Stream<'a> {
         }
     }
 
+    #[must_use]
     pub fn fail_expected<T>(&mut self, expectation: &Expectation) -> Option<T> {
-        self.add_suggestion(self.position, expectation);
+        let _ = self.fail::<T>();
+        self.max_error.expected.push(*expectation);
 
         None
     }
 
+    #[must_use]
     pub fn fail<T>(&mut self) -> Option<T> {
         if self.position > self.max_error.span.start {
-            self.max_error.span = self.position..self.position + 1;
+            self.max_error.span = ParserRange {
+                start: self.position,
+                end: self.position + 1,
+            };
             self.max_error.messages.clear();
             self.max_error.expected.clear();
         }
@@ -274,23 +390,19 @@ impl<'a> Stream<'a> {
         None
     }
 
-    pub fn fail_expected_no_suggestion<T>(&mut self, expected: &Expectation) -> Option<T> {
-        if self.position > self.max_error.span.start {
-            self.max_error.span = self.position..self.position + 1;
-            self.max_error.messages.clear();
+    #[must_use]
+    pub fn fail_expected_suggestion<T>(&mut self, expected: &Expectation) -> Option<T> {
+        self.add_suggestion(self.position, expected);
 
-            self.max_error.expected.clear();
-            self.max_error.expected.push(*expected);
-        } else if self.position == self.max_error.span.start {
-            self.max_error.expected.push(*expected);
-        }
-
-        None
+        self.fail_expected(expected)
     }
 
     pub fn fail_message<T>(&mut self, message: &'static str) -> Option<T> {
         if self.position > self.max_error.span.start {
-            self.max_error.span = self.position..self.position + 1;
+            self.max_error.span = ParserRange {
+                start: self.position,
+                end: self.position + 1,
+            };
             self.max_error.expected.clear();
 
             self.max_error.messages.clear();
@@ -329,33 +441,58 @@ impl<'a> Stream<'a> {
 
     #[inline]
     pub fn add_validation_error_position(&mut self, position: usize, message: &'static str) {
-        self.add_validation_error_span(position..position + 1, message);
+        self.add_validation_error_span(
+            ParserRange {
+                start: position,
+                end: position + 1,
+            },
+            message,
+        );
     }
 
     #[inline]
-    pub fn add_validation_error_span(&mut self, span: Range<usize>, message: &'static str) {
-        self.add_validation_error_fn(|| ValidationError { span, message })
+    pub fn add_validation_error_span<R: Into<ParserRange>>(
+        &mut self,
+        span: R,
+        message: &'static str,
+    ) {
+        self.add_validation_error_fn(span, || message)
     }
 
     #[inline]
-    pub fn add_validation_error_fn<F>(&mut self, callback: F)
+    pub fn add_validation_error_fn<F, R>(&mut self, span: R, callback: F)
     where
-        F: FnOnce() -> ValidationError,
+        F: FnOnce() -> &'static str,
+        R: Into<ParserRange>,
     {
         if self.validation_errors_enabled
             && self.validation_errors.len() < self.max_validation_errors
         {
-            self.validation_errors.push(callback());
+            self.validation_errors.push(ValidationError {
+                span: span.into(),
+                message: callback(),
+            });
         }
     }
 
     #[inline]
     pub fn suggest(&mut self, start_position: usize, expectation: &Expectation) {
-        self.suggest_range(start_position..start_position + 1, expectation)
+        self.suggest_range(
+            ParserRange {
+                start: start_position,
+                end: start_position + 1,
+            },
+            expectation,
+        )
     }
 
     #[inline]
-    pub fn suggest_range(&mut self, range: Range<usize>, expectation: &Expectation) {
+    pub fn suggest_literal(&mut self, start: usize, literal: &'static str) {
+        self.add_suggestion_range(start..start + literal.len(), &Expectation::Literal(literal));
+    }
+
+    #[inline]
+    pub fn suggest_range<R: Into<ParserRange>>(&mut self, range: R, expectation: &Expectation) {
         self.add_suggestion_range(range, expectation);
     }
 }
@@ -425,12 +562,18 @@ where
         }
     }
 
-    fn spanned(mut self) -> impl FnParser<'a, (Range<usize>, T)> {
+    fn spanned(mut self) -> impl FnParser<'a, (ParserRange, T)> {
         move |input: &mut Stream<'a>| {
             let start = input.position;
 
             match self.parse(input) {
-                Some(val) => Some((start..input.position, val)),
+                Some(val) => Some((
+                    ParserRange {
+                        start,
+                        end: input.position,
+                    },
+                    val,
+                )),
                 None => None,
             }
         }
@@ -561,25 +704,24 @@ where
         move |input: &mut Stream<'a>| {
             let start_position = input.position;
 
-            let expected_len = input.max_error.expected.len();
+            let pre_parse_error_len = if input.max_error.span.start == start_position {
+                input.max_error.expected.len()
+            } else {
+                0
+            };
 
             match self.parse(input) {
                 Some(val) => {
                     if input.position == start_position {
                         input.add_suggestion(input.position, &expected);
-
-                        input.max_error.expected.truncate(expected_len);
-                        input.max_error.expected.push(expected);
                     }
-
                     Some(val)
                 }
                 None => {
                     if input.position == start_position {
-                        input.max_error.expected.truncate(expected_len);
+                        input.max_error.expected.truncate(pre_parse_error_len);
                         input.max_error.expected.push(expected);
                     }
-
                     None
                 }
             }
@@ -590,31 +732,27 @@ where
         move |input: &mut Stream<'a>| {
             let start_position = input.position;
 
-            let expected_len = input.max_error.expected.len();
+            let pre_parse_error_len = if input.max_error.span.start == start_position {
+                input.max_error.expected.len()
+            } else {
+                0
+            };
 
             match self.parse(input) {
                 Some(val) => {
                     if input.position == start_position {
                         input.add_suggestions(input.position, &expectations);
-
-                        input.max_error.expected.truncate(expected_len);
-                        input
-                            .max_error
-                            .expected
-                            .extend(expectations.iter().copied());
                     }
-
                     Some(val)
                 }
                 None => {
                     if input.position == start_position {
-                        input.max_error.expected.truncate(expected_len);
+                        input.max_error.expected.truncate(pre_parse_error_len);
                         input
                             .max_error
                             .expected
                             .extend(expectations.iter().copied());
                     }
-
                     None
                 }
             }
@@ -654,10 +792,6 @@ where
 
                 match separator.parse(input) {
                     Some(_) => {
-                        if input.position == partial.position {
-                            break;
-                        }
-
                         let partial = input.save_partial();
 
                         match self.parse(input) {
@@ -896,8 +1030,50 @@ where
         }
     }
 
+    #[inline]
     fn label(self, label: &'static str) -> impl FnParser<'a, T> {
         self.remap(Expectation::Custom(label))
+    }
+
+    #[must_use]
+    fn syntax(mut self, kind: SemanticTokenKind) -> impl FnParser<'a, T> {
+        move |input: &mut Stream<'a>| {
+            let start = input.position;
+
+            match self.parse(input) {
+                Some(value) => {
+                    if !input.semantic_tokens_enabled {
+                        return Some(value);
+                    }
+
+                    let token_range = ParserRange {
+                        start,
+                        end: input.position,
+                    };
+
+                    let should_add = match &input.semantic_tokens_range {
+                        Some(request_range) => token_range.overlaps(*request_range),
+                        None => true,
+                    };
+
+                    if should_add {
+                        input.semantic_tokens.push(SemanticToken {
+                            range: token_range,
+                            kind,
+                        });
+                    }
+
+                    Some(value)
+                }
+                None => None,
+            }
+        }
+    }
+
+    #[inline]
+    #[must_use]
+    fn syntax_keyword(self) -> impl FnParser<'a, T> {
+        self.syntax(SemanticTokenKind::Keyword)
     }
 
     fn on_error(mut self, f: impl Fn(&mut Stream<'a>)) -> impl FnParser<'a, T> {
@@ -938,9 +1114,15 @@ pub fn literal<'a>(literal: &'static str) -> impl FnParser<'a, &'a str> {
             Some(literal)
         } else {
             let expectation = Expectation::Literal(literal);
-            input
-                .add_suggestion_range(input.position..input.position + literal.len(), &expectation);
-            None
+            input.add_suggestion_range(
+                ParserRange {
+                    start: input.position,
+                    end: input.position + literal.len(),
+                },
+                &expectation,
+            );
+
+            input.fail_expected(&expectation)
         }
     }
 }
@@ -968,7 +1150,7 @@ pub fn char<'a>(expected_char: char) -> impl FnParser<'a, char> {
             }
         }
 
-        input.fail_expected(&Expectation::Char(expected_char))
+        input.fail_expected_suggestion(&Expectation::Char(expected_char))
     }
 }
 
@@ -1010,6 +1192,119 @@ where
         input.position += len;
 
         Some(&input.input[start..input.position])
+    }
+}
+
+pub fn take_while_one<'a, F>(predicate: F, expected: Expectation) -> impl FnParser<'a, &'a str>
+where
+    F: Fn(char) -> bool,
+{
+    move |input: &mut Stream<'a>| {
+        let start = input.position;
+        let s = &input.input[start..];
+        let mut len = 0;
+
+        for c in s.chars() {
+            if !predicate(c) {
+                break;
+            }
+            len += c.len_utf8();
+        }
+
+        if len == 0 {
+            input.fail_expected_suggestion(&expected)
+        } else {
+            input.position += len;
+            Some(&input.input[start..input.position])
+        }
+    }
+}
+
+pub fn take_while_one_bytes<'a, F>(
+    predicate: F,
+    expected: Expectation,
+) -> impl FnParser<'a, &'a str>
+where
+    F: Fn(u8) -> bool,
+{
+    move |input: &mut Stream<'a>| {
+        let start = input.position;
+        let bytes = &input.bytes[start..];
+
+        let len = bytes
+            .iter()
+            .position(|&b| !predicate(b))
+            .unwrap_or(bytes.len());
+
+        if len == 0 {
+            input.fail_expected_suggestion(&expected)
+        } else {
+            input.position += len;
+            Some(&input.input[start..input.position])
+        }
+    }
+}
+
+pub fn take_while_range<'a, F>(
+    predicate: F,
+    min: usize,
+    max: usize,
+    expected: Expectation,
+) -> impl FnParser<'a, &'a str>
+where
+    F: Fn(char) -> bool,
+{
+    move |input: &mut Stream<'a>| {
+        let start = input.position;
+        let s = &input.input[start..];
+
+        let mut byte_len = 0;
+        let mut char_count = 0;
+
+        for c in s.chars() {
+            if char_count >= max || !predicate(c) {
+                break;
+            }
+            char_count += 1;
+            byte_len += c.len_utf8();
+        }
+
+        if char_count < min {
+            input.fail_expected_suggestion(&expected)
+        } else {
+            input.position += byte_len;
+            Some(&input.input[start..input.position])
+        }
+    }
+}
+
+pub fn take_while_range_bytes<'a, F>(
+    predicate: F,
+    min: usize,
+    max: usize,
+    expected: Expectation,
+) -> impl FnParser<'a, &'a str>
+where
+    F: Fn(u8) -> bool,
+{
+    move |input: &mut Stream<'a>| {
+        let start = input.position;
+        let bytes = &input.bytes[start..];
+
+        let mut len = 0;
+        for &b in bytes.iter().take(max) {
+            if !predicate(b) {
+                break;
+            }
+            len += 1;
+        }
+
+        if len < min {
+            input.fail_expected_suggestion(&expected)
+        } else {
+            input.position += len;
+            Some(&input.input[start..input.position])
+        }
     }
 }
 
