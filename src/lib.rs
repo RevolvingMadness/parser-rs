@@ -1,5 +1,6 @@
 use crate::accumulate::Accumulate;
 use std::fmt::{Debug, Display};
+use std::mem::take;
 use std::ops::Range;
 
 pub mod accumulate;
@@ -123,6 +124,8 @@ pub struct StreamStateFull {
     position: usize,
     suggestions_len: usize,
     validation_errors_len: usize,
+    signatures_len: usize,
+    signature_parameter_index: usize,
     can_suggest_at_position: bool,
     force_suggest_range: Option<ParserRange>,
 }
@@ -132,12 +135,22 @@ pub struct StreamStatePartial {
     position: usize,
     can_suggest_at_position: bool,
     force_suggest_range: Option<ParserRange>,
+    signatures_len: usize,
+    signature_parameter_index: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct StreamStateChoice {
     suggestions_len: usize,
     validation_errors_len: usize,
+    signatures_len: usize,
+}
+
+#[derive(Debug, Clone, Copy, Ord, PartialOrd, Eq, PartialEq, Hash)]
+pub struct Signature {
+    pub label: &'static str,
+    pub parameter_labels: &'static [&'static str],
+    pub active_parameter: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -156,6 +169,9 @@ pub struct Stream<'a> {
     pub semantic_tokens_enabled: bool,
     pub max_validation_errors: usize,
     pub validation_errors_enabled: bool,
+    pub signature_help_enabled: bool,
+    pub signatures: Vec<Signature>,
+    pub signature_parameter_index: usize,
 }
 
 impl<'a> Stream<'a> {
@@ -183,6 +199,9 @@ impl<'a> Stream<'a> {
             semantic_tokens_enabled: false,
             semantic_tokens: Vec::new(),
             semantic_tokens_range: None,
+            signature_help_enabled: false,
+            signatures: Vec::new(),
+            signature_parameter_index: 0,
         }
     }
 
@@ -215,6 +234,7 @@ impl<'a> Stream<'a> {
         StreamStateChoice {
             suggestions_len: self.suggestions.len(),
             validation_errors_len: self.validation_errors.len(),
+            signatures_len: self.signatures.len(),
         }
     }
 
@@ -232,6 +252,11 @@ impl<'a> Stream<'a> {
             self.validation_errors
                 .drain(start_state.validation_errors_len..pre_branch_state.validation_errors_len);
         }
+
+        if pre_branch_state.signatures_len > start_state.signatures_len {
+            self.signatures
+                .drain(start_state.signatures_len..pre_branch_state.signatures_len);
+        }
     }
 
     #[inline]
@@ -241,6 +266,8 @@ impl<'a> Stream<'a> {
             position: self.position,
             suggestions_len: self.suggestions.len(),
             validation_errors_len: self.validation_errors.len(),
+            signatures_len: self.signatures.len(),
+            signature_parameter_index: self.signature_parameter_index,
             can_suggest_at_position: self.can_suggest_at_position,
             force_suggest_range: self.force_suggest_range,
         }
@@ -251,6 +278,8 @@ impl<'a> Stream<'a> {
         self.position = state.position;
         self.suggestions.truncate(state.suggestions_len);
         self.validation_errors.truncate(state.validation_errors_len);
+        self.signatures.truncate(state.signatures_len);
+        self.signature_parameter_index = state.signature_parameter_index;
         self.can_suggest_at_position = state.can_suggest_at_position;
         self.force_suggest_range = state.force_suggest_range;
     }
@@ -262,6 +291,8 @@ impl<'a> Stream<'a> {
             position: self.position,
             can_suggest_at_position: self.can_suggest_at_position,
             force_suggest_range: self.force_suggest_range,
+            signatures_len: self.signatures.len(),
+            signature_parameter_index: self.signature_parameter_index,
         }
     }
 
@@ -270,6 +301,8 @@ impl<'a> Stream<'a> {
         self.position = state.position;
         self.can_suggest_at_position = state.can_suggest_at_position;
         self.force_suggest_range = state.force_suggest_range;
+        self.signatures.truncate(state.signatures_len);
+        self.signature_parameter_index = state.signature_parameter_index;
     }
 
     pub fn reset(&mut self) {
@@ -501,6 +534,113 @@ pub trait FnParser<'a, T>
 where
     Self: Sized,
 {
+    fn signatures(
+        mut self,
+        signatures: &'static [(&'static str, &'static [&'static str])],
+    ) -> impl FnParser<'a, T> {
+        move |input: &mut Stream<'a>| {
+            if !input.signature_help_enabled {
+                return self.parse(input);
+            }
+
+            let Some(cursor) = input.cursor else {
+                return self.parse(input);
+            };
+
+            if cursor < input.position {
+                return self.parse(input);
+            }
+
+            let old_signatures = take(&mut input.signatures);
+            let old_parameter_index = input.signature_parameter_index;
+            input.signature_parameter_index = 0;
+
+            for (label, parameter_labels) in signatures {
+                input.signatures.push(Signature {
+                    label,
+                    parameter_labels,
+                    active_parameter: None,
+                });
+            }
+
+            let result = self.parse(input);
+
+            if cursor > input.position {
+                input.signatures = old_signatures;
+                input.signature_parameter_index = old_parameter_index;
+            }
+
+            result
+        }
+    }
+
+    fn signature(mut self, commit_signature: usize) -> impl FnParser<'a, T> {
+        move |input: &mut Stream<'a>| {
+            if !input.signature_help_enabled {
+                return self.parse(input);
+            }
+
+            let before = input.position;
+
+            let result = self.parse(input);
+
+            if input.position != before {
+                if commit_signature < input.signatures.len() {
+                    let item = input.signatures.remove(commit_signature);
+                    input.signatures.clear();
+                    input.signatures.push(item);
+                } else {
+                    input.signatures.clear();
+                }
+            }
+
+            result
+        }
+    }
+
+    fn next_signature_parameter(mut self) -> impl FnParser<'a, T> {
+        move |input: &mut Stream<'a>| {
+            if !input.signature_help_enabled {
+                return self.parse(input);
+            }
+            let Some(cursor) = input.cursor else {
+                return self.parse(input);
+            };
+
+            let parameter_index = input.signature_parameter_index;
+            input.signature_parameter_index += 1;
+
+            let should_force = if let Some(range) = input.force_suggest_range {
+                cursor > range.start && cursor <= range.end
+            } else {
+                false
+            };
+
+            let start = input.position;
+            let mut parent_signatures = take(&mut input.signatures);
+
+            let result = self.parse(input);
+            let end = input.position;
+
+            let child_signatures = take(&mut input.signatures);
+
+            if should_force || cursor >= start && cursor <= end {
+                if !child_signatures.is_empty() {
+                    input.signatures = child_signatures;
+                } else {
+                    for signature in &mut parent_signatures {
+                        signature.active_parameter = Some(parameter_index);
+                    }
+                    input.signatures = parent_signatures;
+                }
+            } else {
+                input.signatures = parent_signatures;
+            }
+
+            result
+        }
+    }
+
     fn optional(mut self) -> impl FnParser<'a, Option<T>> {
         move |input: &mut Stream<'a>| {
             let partial = input.save_partial();

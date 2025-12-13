@@ -1,5 +1,5 @@
 use parser_rs::{
-    char, choice, digits, end_of_file, literal, take_while, FnParser, ParserRange, Stream,
+    FnParser, ParserRange, Stream, char, choice, digits, end_of_file, literal, take_while,
 };
 use std::collections::{HashMap, HashSet};
 
