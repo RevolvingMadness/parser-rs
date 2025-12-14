@@ -137,6 +137,7 @@ pub struct StreamStatePartial {
     force_suggest_range: Option<ParserRange>,
     signatures_len: usize,
     signature_parameter_index: usize,
+    signatures_depth: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -172,6 +173,7 @@ pub struct Stream<'a> {
     pub signature_help_enabled: bool,
     pub signatures: Vec<Signature>,
     pub signature_parameter_index: usize,
+    pub signatures_depth: usize,
 }
 
 impl<'a> Stream<'a> {
@@ -202,6 +204,7 @@ impl<'a> Stream<'a> {
             signature_help_enabled: false,
             signatures: Vec::new(),
             signature_parameter_index: 0,
+            signatures_depth: 0,
         }
     }
 
@@ -293,6 +296,7 @@ impl<'a> Stream<'a> {
             force_suggest_range: self.force_suggest_range,
             signatures_len: self.signatures.len(),
             signature_parameter_index: self.signature_parameter_index,
+            signatures_depth: self.signatures_depth,
         }
     }
 
@@ -303,6 +307,7 @@ impl<'a> Stream<'a> {
         self.force_suggest_range = state.force_suggest_range;
         self.signatures.truncate(state.signatures_len);
         self.signature_parameter_index = state.signature_parameter_index;
+        self.signatures_depth = state.signatures_depth;
     }
 
     pub fn reset(&mut self) {
@@ -563,6 +568,7 @@ where
                 });
             }
 
+            input.signatures_depth += 1;
             let result = self.parse(input);
 
             if cursor > input.position {
@@ -581,17 +587,17 @@ where
             }
 
             let before = input.position;
-
+            let old_signatures_depth = input.signatures_depth;
             let result = self.parse(input);
 
-            if input.position != before {
-                if commit_signature < input.signatures.len() {
-                    let item = input.signatures.remove(commit_signature);
-                    input.signatures.clear();
-                    input.signatures.push(item);
-                } else {
-                    input.signatures.clear();
-                }
+            if old_signatures_depth == input.signatures_depth
+                && input.position != before
+                && commit_signature < input.signatures.len()
+            {
+                let item = input.signatures.remove(commit_signature);
+                input.signatures.clear();
+                input.signatures.push(item);
+                input.signatures_depth -= 1;
             }
 
             result
