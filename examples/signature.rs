@@ -120,6 +120,30 @@ mod signature_tests {
         }
 
         #[test]
+        fn test_1param_signature_2() {
+            let text = "command 1param param#command param1 param";
+            let mut input = Stream::new(text, Some(18), Some(10));
+            input.signature_help_enabled = true;
+
+            let _ = (|input: &mut Stream| {
+                parser.parse(input)?;
+                literal("#").parse(input)?;
+                parser.parse(input)?;
+
+                Some(())
+            }).parse(&mut input);
+
+            assert_eq!(
+                input.signatures,
+                vec![Signature {
+                    label: "command 1param param",
+                    parameter_labels: &["1param", "param"],
+                    active_parameter: Some(1)
+                },]
+            );
+        }
+
+        #[test]
         fn test_2param_signature() {
             let text = "command 2param";
             let mut input = Stream::new(text, Some(8), Some(10));
@@ -201,15 +225,19 @@ mod signature_tests {
                 literal("command").parse(input)?;
                 literal(" ").parse(input)?;
 
-                choice((literal("mode1").signature(0), |input: &mut Stream| {
-                    literal("mode2").signature(1).parse(input)?;
-                    literal(" ").parse(input)?;
-                    literal("mode2value")
-                        .next_signature_parameter()
-                        .parse(input)?;
+                choice((
+                    literal("mode1").signature(0),
+                    (|input: &mut Stream| {
+                        literal("mode2").parse(input)?;
+                        literal(" ").parse(input)?;
+                        literal("mode2value")
+                            .next_signature_parameter()
+                            .parse(input)?;
 
-                    Some("")
-                }))
+                        Some("")
+                    })
+                    .signature(1),
+                ))
                 .signatures(&[("mode1", &[""]), ("mode2 mode2value", &["mode2value"])])
                 .next_signature_parameter()
                 .parse(input)?;
@@ -220,6 +248,7 @@ mod signature_tests {
 
                 Some(())
             })
+            .signature(0)
             .signatures(&[("command <mode> param2", &["<mode>", "param2"])])
             .parse(input)?;
 
@@ -270,9 +299,27 @@ mod signature_tests {
         }
 
         #[test]
+        fn test_nested_active_param_1() {
+            let text = "command mode2 mode2value param2";
+            let mut input = Stream::new(text, Some(28), Some(10));
+            input.signature_help_enabled = true;
+
+            let _ = complex_parser(&mut input);
+
+            assert_eq!(
+                input.signatures,
+                vec![Signature {
+                    label: "command <mode> param2",
+                    parameter_labels: &["<mode>", "param2"],
+                    active_parameter: Some(1)
+                }]
+            );
+        }
+
+        #[test]
         fn test_active_param_1() {
-            let text = "command mode2 mode2value ";
-            let mut input = Stream::new(text, Some(25), Some(10));
+            let text = "command mode1 ";
+            let mut input = Stream::new(text, Some(14), Some(10));
             input.signature_help_enabled = true;
 
             let _ = complex_parser(&mut input);
@@ -292,7 +339,9 @@ mod signature_tests {
     mod whitespace_tests {
         use parser_rs::{literal, Expectation, FnParser, Signature, Stream};
 
-        pub fn parse_whitespace(input: &mut Stream) -> Option<()> {
+        pub fn parse_required_whitespace(input: &mut Stream) -> Option<()> {
+            let mut is_first = true;
+
             loop {
                 let bytes = input.remaining().as_bytes();
 
@@ -300,10 +349,12 @@ mod signature_tests {
                     .iter()
                     .position(|b| !b.is_ascii_whitespace())
                     .unwrap_or(bytes.len());
-                if ws_len > 0 {
-                    input.allow_suggestions(input.position, input.position + ws_len);
+                let threshold = if is_first { 1 } else { 0 };
+                if ws_len > threshold {
+                    input.allow_suggestions(input.position + threshold, input.position + ws_len);
                 }
                 input.position += ws_len;
+                is_first = false;
 
                 let bytes = input.remaining().as_bytes();
 
@@ -338,11 +389,12 @@ mod signature_tests {
         fn parser(input: &mut Stream) -> Option<()> {
             (|input: &mut Stream| {
                 literal("command").parse(input)?;
-                parse_whitespace(input)?;
+                parse_required_whitespace(input)?;
                 literal("param").next_signature_parameter().parse(input)?;
 
                 Some(())
             })
+            .signature(0)
             .signatures(&[("command param", &["param"])])
             .parse(input)?;
 

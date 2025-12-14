@@ -125,7 +125,6 @@ pub struct StreamStateFull {
     suggestions_len: usize,
     validation_errors_len: usize,
     signatures_len: usize,
-    signature_parameter_index: usize,
     can_suggest_at_position: bool,
     force_suggest_range: Option<ParserRange>,
 }
@@ -136,7 +135,6 @@ pub struct StreamStatePartial {
     can_suggest_at_position: bool,
     force_suggest_range: Option<ParserRange>,
     signatures_len: usize,
-    signature_parameter_index: usize,
     signatures_depth: usize,
 }
 
@@ -154,7 +152,7 @@ pub struct Signature {
     pub active_parameter: Option<usize>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Stream<'a> {
     pub input: &'a str,
     pub bytes: &'a [u8],
@@ -171,8 +169,8 @@ pub struct Stream<'a> {
     pub max_validation_errors: usize,
     pub validation_errors_enabled: bool,
     pub signature_help_enabled: bool,
+    pub active_parameter: Option<Option<usize>>,
     pub signatures: Vec<Signature>,
-    pub signature_parameter_index: usize,
     pub signatures_depth: usize,
 }
 
@@ -203,7 +201,7 @@ impl<'a> Stream<'a> {
             semantic_tokens_range: None,
             signature_help_enabled: false,
             signatures: Vec::new(),
-            signature_parameter_index: 0,
+            active_parameter: None,
             signatures_depth: 0,
         }
     }
@@ -270,7 +268,6 @@ impl<'a> Stream<'a> {
             suggestions_len: self.suggestions.len(),
             validation_errors_len: self.validation_errors.len(),
             signatures_len: self.signatures.len(),
-            signature_parameter_index: self.signature_parameter_index,
             can_suggest_at_position: self.can_suggest_at_position,
             force_suggest_range: self.force_suggest_range,
         }
@@ -282,7 +279,6 @@ impl<'a> Stream<'a> {
         self.suggestions.truncate(state.suggestions_len);
         self.validation_errors.truncate(state.validation_errors_len);
         self.signatures.truncate(state.signatures_len);
-        self.signature_parameter_index = state.signature_parameter_index;
         self.can_suggest_at_position = state.can_suggest_at_position;
         self.force_suggest_range = state.force_suggest_range;
     }
@@ -295,7 +291,6 @@ impl<'a> Stream<'a> {
             can_suggest_at_position: self.can_suggest_at_position,
             force_suggest_range: self.force_suggest_range,
             signatures_len: self.signatures.len(),
-            signature_parameter_index: self.signature_parameter_index,
             signatures_depth: self.signatures_depth,
         }
     }
@@ -306,7 +301,6 @@ impl<'a> Stream<'a> {
         self.can_suggest_at_position = state.can_suggest_at_position;
         self.force_suggest_range = state.force_suggest_range;
         self.signatures.truncate(state.signatures_len);
-        self.signature_parameter_index = state.signature_parameter_index;
         self.signatures_depth = state.signatures_depth;
     }
 
@@ -332,15 +326,11 @@ impl<'a> Stream<'a> {
         self.remaining().chars().next()
     }
 
+    #[inline]
     pub fn consume_char(&mut self) -> Option<char> {
-        match self.current_char() {
-            Some(c) => {
-                let len = c.len_utf8();
-                self.position += len;
-                Some(c)
-            }
-            None => None,
-        }
+        let c = self.remaining().chars().next()?;
+        self.position += c.len_utf8();
+        Some(c)
     }
 
     #[inline]
@@ -494,7 +484,14 @@ impl<'a> Stream<'a> {
         span: R,
         message: &'static str,
     ) {
-        self.add_validation_error_fn(span, || message)
+        if self.validation_errors_enabled
+            && self.validation_errors.len() < self.max_validation_errors
+        {
+            self.validation_errors.push(ValidationError {
+                span: span.into(),
+                message,
+            });
+        }
     }
 
     #[inline]
@@ -557,8 +554,8 @@ where
             }
 
             let old_signatures = take(&mut input.signatures);
-            let old_parameter_index = input.signature_parameter_index;
-            input.signature_parameter_index = 0;
+
+            let old_active_parameter = input.active_parameter;
 
             for (label, parameter_labels) in signatures {
                 input.signatures.push(Signature {
@@ -569,12 +566,15 @@ where
             }
 
             input.signatures_depth += 1;
+
             let result = self.parse(input);
 
             if cursor > input.position {
                 input.signatures = old_signatures;
-                input.signature_parameter_index = old_parameter_index;
+                input.signatures_depth -= 1;
             }
+
+            input.active_parameter = old_active_parameter;
 
             result
         }
@@ -586,18 +586,48 @@ where
                 return self.parse(input);
             }
 
-            let before = input.position;
+            let Some(cursor) = input.cursor else {
+                return self.parse(input);
+            };
+
+            if cursor < input.position {
+                return self.parse(input);
+            }
+
+            let mut signature = input.signatures.get(commit_signature).copied();
+
+            let old_active_parameter = input.active_parameter;
+            input.active_parameter = Some(None);
+
+            let start = input.position;
             let old_signatures_depth = input.signatures_depth;
+
             let result = self.parse(input);
 
-            if old_signatures_depth == input.signatures_depth
-                && input.position != before
-                && commit_signature < input.signatures.len()
+            if let Some(signature) = &mut signature
+                && let Some(active_parameter) = input.active_parameter
             {
-                let item = input.signatures.remove(commit_signature);
-                input.signatures.clear();
-                input.signatures.push(item);
-                input.signatures_depth -= 1;
+                signature.active_parameter = active_parameter;
+            }
+
+            let no_new_signatures_created = input.signatures_depth == old_signatures_depth;
+
+            if no_new_signatures_created {
+                let advanced = input.position != start;
+
+                if advanced {
+                    input.signatures.clear();
+
+                    if let Some(signature) = signature {
+                        input.signatures.push(signature);
+                    }
+                } else if let Some(signature) = input.signatures.get_mut(commit_signature)
+                    && let Some(active_parameter) = input.active_parameter
+                {
+                    signature.active_parameter = active_parameter;
+
+                    input.active_parameter = old_active_parameter;
+                }
             }
 
             result
@@ -613,34 +643,27 @@ where
                 return self.parse(input);
             };
 
-            let parameter_index = input.signature_parameter_index;
-            input.signature_parameter_index += 1;
-
             let should_force = if let Some(range) = input.force_suggest_range {
-                cursor > range.start && cursor <= range.end
+                cursor >= range.start && cursor <= range.end
             } else {
                 false
             };
 
             let start = input.position;
-            let mut parent_signatures = take(&mut input.signatures);
+
+            let old_signatures_depth = input.signatures_depth;
 
             let result = self.parse(input);
-            let end = input.position;
 
-            let child_signatures = take(&mut input.signatures);
+            let no_new_signatures_created = input.signatures_depth == old_signatures_depth;
 
-            if should_force || cursor >= start && cursor <= end {
-                if !child_signatures.is_empty() {
-                    input.signatures = child_signatures;
-                } else {
-                    for signature in &mut parent_signatures {
-                        signature.active_parameter = Some(parameter_index);
-                    }
-                    input.signatures = parent_signatures;
-                }
-            } else {
-                input.signatures = parent_signatures;
+            if (should_force || cursor >= start)
+                && no_new_signatures_created
+                && let Some(active_parameter) = input.active_parameter
+            {
+                let new_active_parameter = active_parameter.map(|p| p + 1).unwrap_or(0);
+
+                input.active_parameter = Some(Some(new_active_parameter));
             }
 
             result
