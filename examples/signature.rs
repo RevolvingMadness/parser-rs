@@ -16,7 +16,7 @@ mod signature_tests {
                         literal("param").next_signature_parameter().parse(input)?;
                         Some(())
                     })
-                    .signature(0),
+                        .signature(0),
                     (|input: &mut Stream| {
                         literal("2param").next_signature_parameter().parse(input)?;
                         literal(" ").parse(input)?;
@@ -25,17 +25,17 @@ mod signature_tests {
                         literal("param").next_signature_parameter().parse(input)?;
                         Some(())
                     })
-                    .signature(1),
+                        .signature(1),
                 ))
-                .parse(input)?;
+                    .parse(input)?;
 
                 Some(())
             })
-            .signatures(&[
-                ("command 1param param", &["1param", "param"]),
-                ("command 2param param param", &["2param", "param", "param"]),
-            ])
-            .parse(input)?;
+                .signatures(&[
+                    ("command 1param param", &[("1param", None), ("param", None)], None),
+                    ("command 2param param param", &[("2param", None), ("param", None), ("param", None)], None),
+                ])
+                .parse(input)?;
 
             Some(())
         }
@@ -53,13 +53,15 @@ mod signature_tests {
                 vec![
                     Signature {
                         label: "command 1param param",
-                        parameter_labels: &["1param", "param"],
-                        active_parameter: Some(0)
+                        parameters: &[("1param", None), ("param", None)],
+                        active_parameter: Some(0),
+                        documentation: None,
                     },
                     Signature {
                         label: "command 2param param param",
-                        parameter_labels: &["2param", "param", "param"],
-                        active_parameter: Some(0)
+                        parameters: &[("2param", None), ("param", None), ("param", None)],
+                        active_parameter: Some(0),
+                        documentation: None,
                     }
                 ]
             );
@@ -78,13 +80,15 @@ mod signature_tests {
                 vec![
                     Signature {
                         label: "command 1param param",
-                        parameter_labels: &["1param", "param"],
-                        active_parameter: None
+                        parameters: &[("1param", None), ("param", None)],
+                        active_parameter: None,
+                        documentation: None,
                     },
                     Signature {
                         label: "command 2param param param",
-                        parameter_labels: &["2param", "param", "param"],
-                        active_parameter: None
+                        parameters: &[("2param", None), ("param", None), ("param", None)],
+                        active_parameter: None,
+                        documentation: None,
                     }
                 ]
             );
@@ -113,8 +117,9 @@ mod signature_tests {
                 input.signatures,
                 vec![Signature {
                     label: "command 1param param",
-                    parameter_labels: &["1param", "param"],
-                    active_parameter: Some(0)
+                    parameters: &[("1param", None), ("param", None)],
+                    active_parameter: Some(0),
+                    documentation: None,
                 },]
             );
         }
@@ -137,8 +142,9 @@ mod signature_tests {
                 input.signatures,
                 vec![Signature {
                     label: "command 1param param",
-                    parameter_labels: &["1param", "param"],
-                    active_parameter: Some(1)
+                    parameters: &[("1param", None), ("param", None)],
+                    active_parameter: Some(1),
+                    documentation: None,
                 },]
             );
         }
@@ -155,8 +161,9 @@ mod signature_tests {
                 input.signatures,
                 vec![Signature {
                     label: "command 2param param param",
-                    parameter_labels: &["2param", "param", "param"],
-                    active_parameter: Some(0)
+                    parameters: &[("2param", None), ("param", None), ("param", None)],
+                    active_parameter: Some(0),
+                    documentation: None,
                 },]
             );
         }
@@ -173,8 +180,9 @@ mod signature_tests {
                 input.signatures,
                 vec![Signature {
                     label: "command 1param param",
-                    parameter_labels: &["1param", "param"],
-                    active_parameter: Some(1)
+                    parameters: &[("1param", None), ("param", None)],
+                    active_parameter: Some(1),
+                    documentation: None,
                 },]
             );
         }
@@ -192,13 +200,15 @@ mod signature_tests {
                 vec![
                     Signature {
                         label: "command 1param param",
-                        parameter_labels: &["1param", "param"],
-                        active_parameter: None
+                        parameters: &[("1param", None), ("param", None)],
+                        active_parameter: None,
+                        documentation: None,
                     },
                     Signature {
                         label: "command 2param param param",
-                        parameter_labels: &["2param", "param", "param"],
-                        active_parameter: None
+                        parameters: &[("2param", None), ("param", None), ("param", None)],
+                        active_parameter: None,
+                        documentation: None,
                     }
                 ]
             );
@@ -236,11 +246,11 @@ mod signature_tests {
 
                         Some("")
                     })
-                    .signature(1),
+                        .signature(1),
                 ))
-                .signatures(&[("mode1", &[""]), ("mode2 mode2value", &["mode2value"])])
-                .next_signature_parameter()
-                .parse(input)?;
+                    .signatures(&[("mode1", &[("", None)], None), ("mode2 mode2value", &[("mode2value", None)], None)])
+                    .next_signature_parameter()
+                    .parse(input)?;
 
                 literal(" ").parse(input)?;
 
@@ -248,9 +258,9 @@ mod signature_tests {
 
                 Some(())
             })
-            .signature(0)
-            .signatures(&[("command <mode> param2", &["<mode>", "param2"])])
-            .parse(input)?;
+                .signature(0)
+                .signatures(&[("command <mode> param2", &[("<mode>", None), ("param2", None)], None)])
+                .parse(input)?;
 
             Some(())
         }
@@ -268,13 +278,15 @@ mod signature_tests {
                 vec![
                     Signature {
                         label: "mode1",
-                        parameter_labels: &[""],
-                        active_parameter: None
+                        parameters: &[("", None)],
+                        active_parameter: None,
+                        documentation: None,
                     },
                     Signature {
                         label: "mode2 mode2value",
-                        parameter_labels: &["mode2value"],
-                        active_parameter: None
+                        parameters: &[("mode2value", None)],
+                        active_parameter: None,
+                        documentation: None,
                     }
                 ]
             );
@@ -292,8 +304,9 @@ mod signature_tests {
                 input.signatures,
                 vec![Signature {
                     label: "mode2 mode2value",
-                    parameter_labels: &["mode2value"],
-                    active_parameter: Some(0)
+                    parameters: &[("mode2value", None)],
+                    active_parameter: Some(0),
+                    documentation: None,
                 }]
             );
         }
@@ -310,8 +323,9 @@ mod signature_tests {
                 input.signatures,
                 vec![Signature {
                     label: "command <mode> param2",
-                    parameter_labels: &["<mode>", "param2"],
-                    active_parameter: Some(1)
+                    parameters: &[("<mode>", None), ("param2", None)],
+                    active_parameter: Some(1),
+                    documentation: None,
                 }]
             );
         }
@@ -328,8 +342,9 @@ mod signature_tests {
                 input.signatures,
                 vec![Signature {
                     label: "command <mode> param2",
-                    parameter_labels: &["<mode>", "param2"],
-                    active_parameter: Some(1)
+                    parameters: &[("<mode>", None), ("param2", None)],
+                    active_parameter: Some(1),
+                    documentation: None,
                 }]
             );
         }
@@ -394,9 +409,9 @@ mod signature_tests {
 
                 Some(())
             })
-            .signature(0)
-            .signatures(&[("command param", &["param"])])
-            .parse(input)?;
+                .signature(0)
+                .signatures(&[("command param", &[("param", None)], None)])
+                .parse(input)?;
 
             Some(())
         }
@@ -413,8 +428,9 @@ mod signature_tests {
                 input.signatures,
                 vec![Signature {
                     label: "command param",
-                    parameter_labels: &["param"],
-                    active_parameter: Some(0)
+                    parameters: &[("param", None)],
+                    active_parameter: Some(0),
+                    documentation: None,
                 }]
             );
         }
@@ -431,8 +447,9 @@ mod signature_tests {
                 input.signatures,
                 vec![Signature {
                     label: "command param",
-                    parameter_labels: &["param"],
-                    active_parameter: Some(0)
+                    parameters: &[("param", None)],
+                    active_parameter: Some(0),
+                    documentation: None,
                 }]
             );
         }
@@ -449,8 +466,9 @@ mod signature_tests {
                 input.signatures,
                 vec![Signature {
                     label: "command param",
-                    parameter_labels: &["param"],
-                    active_parameter: None
+                    parameters: &[("param", None)],
+                    active_parameter: None,
+                    documentation: None,
                 }]
             );
         }

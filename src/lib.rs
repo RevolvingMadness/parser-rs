@@ -148,7 +148,8 @@ pub struct StreamStateChoice {
 #[derive(Debug, Clone, Copy, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub struct Signature {
     pub label: &'static str,
-    pub parameter_labels: &'static [&'static str],
+    pub parameters: &'static [(&'static str, Option<&'static str>)],
+    pub documentation: Option<&'static str>,
     pub active_parameter: Option<usize>,
 }
 
@@ -538,7 +539,7 @@ where
 {
     fn signatures(
         mut self,
-        signatures: &'static [(&'static str, &'static [&'static str])],
+        signatures: &'static [(&'static str, &'static [(&'static str, Option<&'static str>)], Option<&'static str>)],
     ) -> impl FnParser<'a, T> {
         move |input: &mut Stream<'a>| {
             if !input.signature_help_enabled {
@@ -557,10 +558,11 @@ where
 
             let old_active_parameter = input.active_parameter;
 
-            for (label, parameter_labels) in signatures {
+            for (label, parameters, documentation) in signatures.iter().copied() {
                 input.signatures.push(Signature {
                     label,
-                    parameter_labels,
+                    parameters,
+                    documentation,
                     active_parameter: None,
                 });
             }
@@ -957,7 +959,7 @@ where
             }
 
             loop {
-                let partial = input.save_partial();
+                let separator_partial = input.save_partial();
 
                 match separator.parse(input) {
                     Some(_) => {
@@ -972,16 +974,21 @@ where
                                 }
                             }
                             None => {
-                                return None;
+                                if input.position != partial.position {
+                                    return None;
+                                }
+
+                                input.restore_partial(separator_partial);
+                                break;
                             }
                         }
                     }
                     None => {
-                        if input.position != partial.position {
+                        if input.position != separator_partial.position {
                             return None;
                         }
 
-                        input.restore_partial(partial);
+                        input.restore_partial(separator_partial);
 
                         break;
                     }
