@@ -1263,12 +1263,38 @@ where
         }
     }
 
-    fn map<U>(mut self, f: impl Fn(T) -> U) -> impl FnParser<'a, U> {
-        move |input: &mut Stream<'a>| self.parse(input).map(&f)
+    fn map<U>(mut self, mut f: impl FnMut(T) -> U) -> impl FnParser<'a, U> {
+        move |input: &mut Stream<'a>| {
+            let result = self.parse(input)?;
+
+            Some(f(result))
+        }
+    }
+
+    fn map_input<U>(mut self, mut f: impl FnMut(&mut Stream, T) -> U) -> impl FnParser<'a, U> {
+        move |input: &mut Stream<'a>| {
+            let result = self.parse(input)?;
+
+            Some(f(input, result))
+        }
     }
 
     fn map_to<U: Clone>(mut self, value: U) -> impl FnParser<'a, U> {
-        move |input: &mut Stream<'a>| self.parse(input).map(|_| value.clone())
+        move |input: &mut Stream<'a>| {
+            self.parse(input)?;
+
+            Some(value.clone())
+        }
+    }
+
+    fn padded<U>(mut self, mut p: impl FnParser<'a, U>) -> impl FnParser<'a, T> {
+        move |input: &mut Stream<'a>| {
+            p.parse(input)?;
+            let result = self.parse(input)?;
+            p.parse(input)?;
+
+            Some(result)
+        }
     }
 
     fn parse(&mut self, input: &mut Stream<'a>) -> Option<T>;
