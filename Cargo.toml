@@ -10,10 +10,10 @@ keywords = ["parser", "parsing", "functional", "imperative", "combinator"]
 categories = ["parsing"]
 
 [dependencies]
+chumsky = "0.11.2"
 
 [dev-dependencies]
 criterion = "0.8.0"
-chumsky = "0.11.2"
 
 [[bench]]
 name = "choice"

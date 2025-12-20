@@ -116,17 +116,17 @@ pub struct Suggestion {
 #[derive(Debug, Clone)]
 pub struct ValidationError {
     pub span: ParserRange,
-    pub message: &'static str,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct StreamStateFull {
-    position: usize,
-    suggestions_len: usize,
-    validation_errors_len: usize,
-    signatures_len: usize,
-    can_suggest_at_position: bool,
-    force_suggest_range: Option<ParserRange>,
+    pub position: usize,
+    pub suggestions_len: usize,
+    pub validation_errors_len: usize,
+    pub signatures_len: usize,
+    pub can_suggest_at_position: bool,
+    pub force_suggest_range: Option<ParserRange>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -464,12 +464,12 @@ impl<'a> Stream<'a> {
     }
 
     #[inline]
-    pub fn add_validation_error(&mut self, message: &'static str) {
+    pub fn add_validation_error<M: ToString>(&mut self, message: M) {
         self.add_validation_error_position(self.position, message);
     }
 
     #[inline]
-    pub fn add_validation_error_position(&mut self, position: usize, message: &'static str) {
+    pub fn add_validation_error_position<M: ToString>(&mut self, position: usize, message: M) {
         self.add_validation_error_span(
             ParserRange {
                 start: position,
@@ -480,33 +480,34 @@ impl<'a> Stream<'a> {
     }
 
     #[inline]
-    pub fn add_validation_error_span<R: Into<ParserRange>>(
+    pub fn add_validation_error_span<R: Into<ParserRange>, M: ToString>(
         &mut self,
         span: R,
-        message: &'static str,
+        message: M,
     ) {
         if self.validation_errors_enabled
             && self.validation_errors.len() < self.max_validation_errors
         {
             self.validation_errors.push(ValidationError {
                 span: span.into(),
-                message,
+                message: message.to_string(),
             });
         }
     }
 
     #[inline]
-    pub fn add_validation_error_fn<F, R>(&mut self, span: R, callback: F)
+    pub fn add_validation_error_fn<F, R, M>(&mut self, span: R, callback: F)
     where
-        F: FnOnce() -> &'static str,
+        F: FnOnce() -> M,
         R: Into<ParserRange>,
+        M: ToString,
     {
         if self.validation_errors_enabled
             && self.validation_errors.len() < self.max_validation_errors
         {
             self.validation_errors.push(ValidationError {
                 span: span.into(),
-                message: callback(),
+                message: callback().to_string(),
             });
         }
     }
@@ -539,7 +540,11 @@ where
 {
     fn signatures(
         mut self,
-        signatures: &'static [(&'static str, &'static [(&'static str, Option<&'static str>)], Option<&'static str>)],
+        signatures: &'static [(
+            &'static str,
+            &'static [(&'static str, Option<&'static str>)],
+            Option<&'static str>,
+        )],
     ) -> impl FnParser<'a, T> {
         move |input: &mut Stream<'a>| {
             if !input.signature_help_enabled {
@@ -691,6 +696,21 @@ where
         }
     }
 
+    fn attempt(mut self) -> impl FnParser<'a, Option<T>> {
+        move |input: &mut Stream<'a>| {
+            let partial = input.save_partial();
+
+            match self.parse(input) {
+                Some(val) => Some(Some(val)),
+                None => {
+                    input.restore_partial(partial);
+
+                    Some(None)
+                }
+            }
+        }
+    }
+
     fn dont_suggest_if(&mut self, shouldnt_suggest: bool) -> impl FnParser<'a, T> {
         move |input: &mut Stream<'a>| {
             if shouldnt_suggest {
@@ -708,28 +728,20 @@ where
         }
     }
 
-    fn attempt(mut self) -> impl FnParser<'a, Option<T>> {
-        move |input: &mut Stream<'a>| {
-            let start = input.position;
-            let suggestions_len = input.suggestions.len();
-
-            match self.parse(input) {
-                Some(val) => Some(Some(val)),
-                None => {
-                    input.position = start;
-                    input.suggestions.truncate(suggestions_len);
-
-                    Some(None)
-                }
-            }
-        }
-    }
-
     fn sliced(mut self) -> impl FnParser<'a, &'a str> {
         move |input: &mut Stream<'a>| {
             let start = input.position;
 
             self.parse(input).map(|_| input.slice_from(start))
+        }
+    }
+
+    fn sliced_include(mut self) -> impl FnParser<'a, (&'a str, T)> {
+        move |input: &mut Stream<'a>| {
+            let start = input.position;
+
+            self.parse(input)
+                .map(|value| (input.slice_from(start), value))
         }
     }
 
@@ -1309,7 +1321,301 @@ where
     }
 }
 
-pub fn literal<'a>(literal: &'static str) -> impl FnParser<'a, &'a str> {
+pub trait FnParserSeparatedBy<'a, T, C>
+where
+    Self: Sized,
+{
+    fn separated_by<S, U>(mut self, mut separator: S) -> impl FnParser<'a, C>
+    where
+        S: FnParser<'a, U>,
+        C: Default + Accumulate<T>,
+    {
+        move |input: &mut Stream<'a>| {
+            let partial = input.save_partial();
+
+            let mut collection = C::default();
+
+            let (advanced, first) = match self.parse(input, &mut collection) {
+                Some(first) => (input.position != partial.position, first),
+                None => {
+                    if input.position != partial.position {
+                        return None;
+                    }
+
+                    input.restore_partial(partial);
+
+                    return Some(C::default());
+                }
+            };
+
+            collection.accumulate(first);
+
+            if !advanced {
+                return Some(collection);
+            }
+
+            loop {
+                let separator_partial = input.save_partial();
+
+                match separator.parse(input) {
+                    Some(_) => {
+                        let partial = input.save_partial();
+
+                        match self.parse(input, &mut collection) {
+                            Some(next) => {
+                                collection.accumulate(next);
+
+                                if input.position == partial.position {
+                                    break;
+                                }
+                            }
+                            None => {
+                                if input.position != partial.position {
+                                    return None;
+                                }
+
+                                input.restore_partial(separator_partial);
+                                break;
+                            }
+                        }
+                    }
+                    None => {
+                        if input.position != separator_partial.position {
+                            return None;
+                        }
+
+                        input.restore_partial(separator_partial);
+
+                        break;
+                    }
+                }
+            }
+
+            Some(collection)
+        }
+    }
+
+    fn separated_by_trailing<S, U>(mut self, mut separator: S) -> impl FnParser<'a, C>
+    where
+        S: FnParser<'a, U>,
+        C: Default + Accumulate<T>,
+    {
+        move |input: &mut Stream<'a>| {
+            let partial = input.save_partial();
+
+            let mut collection = C::default();
+
+            let (advanced, first) = match self.parse(input, &mut collection) {
+                Some(first) => (input.position != partial.position, first),
+                None => {
+                    if input.position != partial.position {
+                        return None;
+                    }
+
+                    input.restore_partial(partial);
+
+                    return Some(C::default());
+                }
+            };
+
+            collection.accumulate(first);
+
+            if !advanced {
+                return Some(collection);
+            }
+
+            loop {
+                let partial = input.save_partial();
+
+                match separator.parse(input) {
+                    Some(_) => {
+                        if input.position == partial.position {
+                            break;
+                        }
+
+                        let partial = input.save_partial();
+
+                        match self.parse(input, &mut collection) {
+                            Some(next) => {
+                                collection.accumulate(next);
+
+                                if input.position == partial.position {
+                                    break;
+                                }
+                            }
+                            None => {
+                                if input.position != partial.position {
+                                    return None;
+                                }
+
+                                input.restore_partial(partial);
+
+                                break;
+                            }
+                        }
+                    }
+                    None => {
+                        if input.position != partial.position {
+                            return None;
+                        }
+
+                        input.restore_partial(partial);
+
+                        break;
+                    }
+                }
+            }
+
+            Some(collection)
+        }
+    }
+
+    fn separated_by_one<S, U>(mut self, mut separator: S) -> impl FnParser<'a, C>
+    where
+        S: FnParser<'a, U>,
+        C: Default + Accumulate<T>,
+    {
+        move |input: &mut Stream<'a>| {
+            let mut collection = C::default();
+
+            let start = input.position;
+            let first = self.parse(input, &mut collection)?;
+            let advanced = input.position != start;
+
+            collection.accumulate(first);
+
+            if !advanced {
+                return Some(collection);
+            }
+
+            loop {
+                let partial = input.save_partial();
+                match separator.parse(input) {
+                    Some(_) => {
+                        if input.position == partial.position {
+                            break;
+                        }
+
+                        let partial = input.save_partial();
+                        match self.parse(input, &mut collection) {
+                            Some(next) => {
+                                collection.accumulate(next);
+                                if input.position == partial.position {
+                                    break;
+                                }
+                            }
+                            None => {
+                                return None;
+                            }
+                        }
+                    }
+                    None => {
+                        if input.position != partial.position {
+                            return None;
+                        }
+                        break;
+                    }
+                }
+            }
+
+            Some(collection)
+        }
+    }
+
+    fn separated_by_range<S, U>(
+        mut self,
+        min: usize,
+        max: usize,
+        mut separator: S,
+    ) -> impl FnParser<'a, C>
+    where
+        S: FnParser<'a, U>,
+        C: Default + Accumulate<T>,
+    {
+        move |input: &mut Stream<'a>| {
+            let mut collection = C::default();
+            let mut count = 0;
+
+            let partial = input.save_partial();
+
+            match self.parse(input, &mut collection) {
+                Some(first) => {
+                    let advanced = input.position != partial.position;
+                    collection.accumulate(first);
+                    count += 1;
+
+                    if !advanced {
+                        if count < min {
+                            return None;
+                        } else {
+                            return Some(collection);
+                        }
+                    }
+                }
+                None => {
+                    if min > 0 {
+                        return None;
+                    } else {
+                        return Some(collection);
+                    }
+                }
+            }
+
+            loop {
+                if count >= max {
+                    break;
+                }
+
+                let partial = input.save_partial();
+                match separator.parse(input) {
+                    Some(_) => {
+                        if input.position == partial.position {
+                            break;
+                        }
+
+                        let partial = input.save_partial();
+
+                        match self.parse(input, &mut collection) {
+                            Some(next) => {
+                                collection.accumulate(next);
+                                count += 1;
+
+                                if input.position == partial.position {
+                                    break;
+                                }
+                            }
+                            None => {
+                                return None;
+                            }
+                        }
+                    }
+                    None => {
+                        if count >= min && input.position == partial.position {
+                            break;
+                        } else {
+                            return None;
+                        }
+                    }
+                }
+            }
+
+            Some(collection)
+        }
+    }
+
+    fn parse(&mut self, input: &mut Stream<'a>, accumulated: &mut C) -> Option<T>;
+}
+
+impl<'a, T, F, C> FnParserSeparatedBy<'a, T, C> for F
+where
+    F: FnMut(&mut Stream<'a>, &mut C) -> Option<T>,
+{
+    fn parse(&mut self, input: &mut Stream<'a>, accumulated: &mut C) -> Option<T> {
+        self(input, accumulated)
+    }
+}
+
+pub fn literal<'a>(literal: &'static str) -> impl FnParser<'a, &'static str> {
     move |input: &mut Stream<'a>| {
         if input.remaining_bytes().starts_with(literal.as_bytes()) {
             input.position += literal.len();
@@ -1352,7 +1658,7 @@ pub fn char<'a>(expected_char: char) -> impl FnParser<'a, char> {
             }
         }
 
-        input.fail_expected_suggestion(&Expectation::Char(expected_char))
+        input.fail_expected(&Expectation::Char(expected_char))
     }
 }
 
@@ -1414,7 +1720,7 @@ where
         }
 
         if len == 0 {
-            input.fail_expected_suggestion(&expected)
+            input.fail_expected(&expected)
         } else {
             input.position += len;
             Some(&input.input[start..input.position])
@@ -1439,7 +1745,7 @@ where
             .unwrap_or(bytes.len());
 
         if len == 0 {
-            input.fail_expected_suggestion(&expected)
+            input.fail_expected(&expected)
         } else {
             input.position += len;
             Some(&input.input[start..input.position])
@@ -1472,7 +1778,7 @@ where
         }
 
         if char_count < min {
-            input.fail_expected_suggestion(&expected)
+            input.fail_expected(&expected)
         } else {
             input.position += byte_len;
             Some(&input.input[start..input.position])
@@ -1502,7 +1808,7 @@ where
         }
 
         if len < min {
-            input.fail_expected_suggestion(&expected)
+            input.fail_expected(&expected)
         } else {
             input.position += len;
             Some(&input.input[start..input.position])

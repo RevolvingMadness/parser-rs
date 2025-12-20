@@ -2,7 +2,7 @@
 mod signature_tests {
     #[cfg(test)]
     mod regular_tests {
-        use parser_rs::{char, choice, literal, FnParser, Signature, Stream};
+        use parser_rs::{FnParser, Signature, Stream, char, choice, literal};
 
         fn parser(input: &mut Stream) -> Option<()> {
             (|input: &mut Stream| {
@@ -16,7 +16,7 @@ mod signature_tests {
                         literal("param").next_signature_parameter().parse(input)?;
                         Some(())
                     })
-                        .signature(0),
+                    .signature(0),
                     (|input: &mut Stream| {
                         literal("2param").next_signature_parameter().parse(input)?;
                         literal(" ").parse(input)?;
@@ -25,17 +25,25 @@ mod signature_tests {
                         literal("param").next_signature_parameter().parse(input)?;
                         Some(())
                     })
-                        .signature(1),
+                    .signature(1),
                 ))
-                    .parse(input)?;
+                .parse(input)?;
 
                 Some(())
             })
-                .signatures(&[
-                    ("command 1param param", &[("1param", None), ("param", None)], None),
-                    ("command 2param param param", &[("2param", None), ("param", None), ("param", None)], None),
-                ])
-                .parse(input)?;
+            .signatures(&[
+                (
+                    "command 1param param",
+                    &[("1param", None), ("param", None)],
+                    None,
+                ),
+                (
+                    "command 2param param param",
+                    &[("2param", None), ("param", None), ("param", None)],
+                    None,
+                ),
+            ])
+            .parse(input)?;
 
             Some(())
         }
@@ -136,7 +144,8 @@ mod signature_tests {
                 parser.parse(input)?;
 
                 Some(())
-            }).parse(&mut input);
+            })
+            .parse(&mut input);
 
             assert_eq!(
                 input.signatures,
@@ -228,7 +237,7 @@ mod signature_tests {
 
     #[cfg(test)]
     mod complex_tests {
-        use parser_rs::{choice, literal, FnParser, Signature, Stream};
+        use parser_rs::{FnParser, Signature, Stream, choice, literal};
 
         fn complex_parser(input: &mut Stream) -> Option<()> {
             (|input: &mut Stream| {
@@ -246,11 +255,14 @@ mod signature_tests {
 
                         Some("")
                     })
-                        .signature(1),
+                    .signature(1),
                 ))
-                    .signatures(&[("mode1", &[("", None)], None), ("mode2 mode2value", &[("mode2value", None)], None)])
-                    .next_signature_parameter()
-                    .parse(input)?;
+                .signatures(&[
+                    ("mode1", &[("", None)], None),
+                    ("mode2 mode2value", &[("mode2value", None)], None),
+                ])
+                .next_signature_parameter()
+                .parse(input)?;
 
                 literal(" ").parse(input)?;
 
@@ -258,9 +270,13 @@ mod signature_tests {
 
                 Some(())
             })
-                .signature(0)
-                .signatures(&[("command <mode> param2", &[("<mode>", None), ("param2", None)], None)])
-                .parse(input)?;
+            .signature(0)
+            .signatures(&[(
+                "command <mode> param2",
+                &[("<mode>", None), ("param2", None)],
+                None,
+            )])
+            .parse(input)?;
 
             Some(())
         }
@@ -352,7 +368,7 @@ mod signature_tests {
 
     #[cfg(test)]
     mod whitespace_tests {
-        use parser_rs::{literal, Expectation, FnParser, Signature, Stream};
+        use parser_rs::{Expectation, FnParser, Signature, Stream, literal};
 
         pub fn parse_required_whitespace(input: &mut Stream) -> Option<()> {
             let mut is_first = true;
@@ -409,9 +425,9 @@ mod signature_tests {
 
                 Some(())
             })
-                .signature(0)
-                .signatures(&[("command param", &[("param", None)], None)])
-                .parse(input)?;
+            .signature(0)
+            .signatures(&[("command param", &[("param", None)], None)])
+            .parse(input)?;
 
             Some(())
         }
