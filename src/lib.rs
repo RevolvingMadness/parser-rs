@@ -85,6 +85,10 @@ impl ParserRange {
     pub fn overlaps(&self, other: ParserRange) -> bool {
         self.start < other.end && other.start < self.end
     }
+
+    pub fn contains(&self, position: usize) -> bool {
+        position >= self.start && position <= self.end
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -684,12 +688,19 @@ where
             match self.parse(input) {
                 Some(val) => Some(Some(val)),
                 None => {
-                    if input.position != partial.position {
-                        None
-                    } else {
+                    if input.position == partial.position
+                        || input
+                            .force_suggest_range
+                            .is_some_and(|force_suggest_range| {
+                                input.position >= force_suggest_range.start
+                                    && input.position <= force_suggest_range.end
+                            })
+                    {
                         input.restore_partial(partial);
 
                         Some(None)
+                    } else {
+                        None
                     }
                 }
             }
@@ -905,6 +916,23 @@ where
                         input.max_error.expected.truncate(pre_parse_error_len);
                         input.max_error.expected.push(expected);
                     }
+                    None
+                }
+            }
+        }
+    }
+
+    fn suggest(mut self, expected: Expectation) -> impl FnParser<'a, T> {
+        move |input: &mut Stream<'a>| {
+            let start_position = input.position;
+
+            match self.parse(input) {
+                Some(val) => Some(val),
+                None => {
+                    if input.position == start_position {
+                        input.max_error.expected.push(expected);
+                    }
+
                     None
                 }
             }
@@ -1309,6 +1337,40 @@ where
         }
     }
 
+    fn peek(mut self) -> impl FnParser<'a, T> {
+        move |input: &mut Stream<'a>| {
+            let partial = input.save_partial();
+            match self.parse(input) {
+                Some(val) => {
+                    input.restore_partial(partial);
+                    Some(val)
+                }
+                None => {
+                    input.restore_partial(partial);
+                    None
+                }
+            }
+        }
+    }
+
+    fn not_followed_by<U>(mut self, mut other: impl FnParser<'a, U>) -> impl FnParser<'a, T> {
+        move |input: &mut Stream<'a>| {
+            let start = input.position;
+            let result = self.parse(input)?;
+
+            let full = input.save_full();
+            if other.parse(input).is_some() {
+                input.restore_full(full);
+                input.position = start;
+                return None;
+            }
+
+            input.restore_full(full);
+
+            Some(result)
+        }
+    }
+
     fn parse(&mut self, input: &mut Stream<'a>) -> Option<T>;
 }
 
@@ -1622,12 +1684,23 @@ pub fn literal<'a>(literal: &'static str) -> impl FnParser<'a, &'static str> {
             Some(literal)
         } else {
             let expectation = Expectation::Literal(literal);
+
+            input.fail_expected(&expectation)
+        }
+    }
+}
+
+pub fn suggest_literal<'a>(literal: &'static str) -> impl FnParser<'a, &'static str> {
+    move |input: &mut Stream<'a>| {
+        if input.remaining_bytes().starts_with(literal.as_bytes()) {
+            input.position += literal.len();
+            Some(literal)
+        } else {
+            let expectation = Expectation::Literal(literal);
+
             input.add_suggestion_range(
-                ParserRange {
-                    start: input.position,
-                    end: input.position + literal.len(),
-                },
-                &expectation,
+                input.position..input.position + literal.len(),
+                &Expectation::Literal(literal),
             );
 
             input.fail_expected(&expectation)

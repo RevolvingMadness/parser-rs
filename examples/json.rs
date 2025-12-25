@@ -1,7 +1,7 @@
 use parser_rs::{
     FnParser, ParserRange, Stream, char, choice, digits, end_of_file, literal, take_while,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum JsonValue {
@@ -10,7 +10,7 @@ pub enum JsonValue {
     Number(f64),
     String(String),
     Array(Vec<JsonValue>),
-    Object(HashMap<String, JsonValue>),
+    Object(BTreeMap<String, JsonValue>),
 }
 
 fn padded<'a, T, P>(mut parser: P) -> impl FnParser<'a, T>
@@ -137,7 +137,7 @@ fn parse_object<'a>(input: &mut Stream<'a>) -> Option<JsonValue> {
     let items: Vec<((ParserRange, String), JsonValue)> = padded(items_parser).parse(input)?;
     char('}').parse(input)?;
 
-    let mut object = HashMap::new();
+    let mut object = BTreeMap::new();
     let mut seen_keys = HashSet::new();
     for ((key_span, key), value) in items {
         if !seen_keys.insert(key.clone()) {
