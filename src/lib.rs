@@ -142,19 +142,24 @@ pub struct StreamStatePartial {
     signatures_depth: usize,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct StreamStateChoice {
-    suggestions_len: usize,
-    validation_errors_len: usize,
-    signatures_len: usize,
-}
-
 #[derive(Debug, Clone, Copy, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub struct Signature {
     pub label: &'static str,
     pub parameters: &'static [(&'static str, Option<&'static str>)],
     pub documentation: Option<&'static str>,
     pub active_parameter: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Checkpoint {
+    pub position: usize,
+    pub suggestions_len: usize,
+    pub validation_errors_len: usize,
+    pub signatures_len: usize,
+    pub semantic_tokens_len: usize,
+    pub signatures_depth: usize,
+    pub can_suggest_at_position: bool,
+    pub force_suggest_range: Option<ParserRange>,
 }
 
 #[derive(Debug)]
@@ -211,6 +216,36 @@ impl<'a> Stream<'a> {
         }
     }
 
+    #[inline(always)]
+    pub fn checkpoint(&self) -> Checkpoint {
+        Checkpoint {
+            position: self.position,
+            suggestions_len: self.suggestions.len(),
+            validation_errors_len: self.validation_errors.len(),
+            signatures_len: self.signatures.len(),
+            semantic_tokens_len: self.semantic_tokens.len(),
+            signatures_depth: self.signatures_depth,
+            can_suggest_at_position: self.can_suggest_at_position,
+            force_suggest_range: self.force_suggest_range,
+        }
+    }
+
+    #[inline(always)]
+    pub fn rollback(&mut self, checkpoint: Checkpoint) {
+        self.position = checkpoint.position;
+
+        self.suggestions.truncate(checkpoint.suggestions_len);
+        self.validation_errors
+            .truncate(checkpoint.validation_errors_len);
+        self.signatures.truncate(checkpoint.signatures_len);
+        self.semantic_tokens
+            .truncate(checkpoint.semantic_tokens_len);
+
+        self.signatures_depth = checkpoint.signatures_depth;
+        self.can_suggest_at_position = checkpoint.can_suggest_at_position;
+        self.force_suggest_range = checkpoint.force_suggest_range;
+    }
+
     pub fn add_syntax_from(&mut self, start: usize, kind: SemanticTokenKind) {
         if !self.semantic_tokens_enabled {
             return;
@@ -231,37 +266,6 @@ impl<'a> Stream<'a> {
                 range: token_range,
                 kind,
             });
-        }
-    }
-
-    #[inline]
-    #[must_use]
-    pub fn save_choice(&self) -> StreamStateChoice {
-        StreamStateChoice {
-            suggestions_len: self.suggestions.len(),
-            validation_errors_len: self.validation_errors.len(),
-            signatures_len: self.signatures.len(),
-        }
-    }
-
-    pub fn resolve_choice_success(
-        &mut self,
-        start_state: StreamStateChoice,
-        pre_branch_state: StreamStateChoice,
-    ) {
-        if pre_branch_state.suggestions_len > start_state.suggestions_len {
-            self.suggestions
-                .drain(start_state.suggestions_len..pre_branch_state.suggestions_len);
-        }
-
-        if pre_branch_state.validation_errors_len > start_state.validation_errors_len {
-            self.validation_errors
-                .drain(start_state.validation_errors_len..pre_branch_state.validation_errors_len);
-        }
-
-        if pre_branch_state.signatures_len > start_state.signatures_len {
-            self.signatures
-                .drain(start_state.signatures_len..pre_branch_state.signatures_len);
         }
     }
 
@@ -683,25 +687,14 @@ where
 
     fn optional(mut self) -> impl FnParser<'a, Option<T>> {
         move |input: &mut Stream<'a>| {
-            let partial = input.save_partial();
+            let checkpoint = input.checkpoint();
 
             match self.parse(input) {
                 Some(val) => Some(Some(val)),
-                None => {
-                    if input.position == partial.position
-                        || input
-                            .force_suggest_range
-                            .is_some_and(|force_suggest_range| {
-                                input.position >= force_suggest_range.start
-                                    && input.position <= force_suggest_range.end
-                            })
-                    {
-                        input.restore_partial(partial);
 
-                        Some(None)
-                    } else {
-                        None
-                    }
+                None => {
+                    input.rollback(checkpoint);
+                    Some(None)
                 }
             }
         }
@@ -709,14 +702,13 @@ where
 
     fn attempt(mut self) -> impl FnParser<'a, Option<T>> {
         move |input: &mut Stream<'a>| {
-            let partial = input.save_partial();
+            let checkpoint = input.checkpoint();
 
             match self.parse(input) {
                 Some(val) => Some(Some(val)),
                 None => {
-                    input.restore_partial(partial);
-
-                    Some(None)
+                    input.rollback(checkpoint);
+                    None
                 }
             }
         }
@@ -1372,6 +1364,14 @@ where
     }
 
     fn parse(&mut self, input: &mut Stream<'a>) -> Option<T>;
+
+    fn parse_with_eof(&mut self, input: &mut Stream<'a>) -> Option<T> {
+        let result = self.parse(input)?;
+
+        end_of_file(input)?;
+
+        Some(result)
+    }
 }
 
 impl<'a, T, F> FnParser<'a, T> for F
@@ -1918,31 +1918,15 @@ macro_rules! impl_choice_tuple {
             $($name: FnParser<'a, T>),*
         {
             fn parse(&mut self, input: &mut Stream<'a>) -> Option<T> {
-                let choice_start = input.save_choice();
-                let partial = input.save_partial();
-
                 $(
-                    let branch_start = input.save_choice();
+                    let checkpoint = input.checkpoint();
 
                     match self.$idx.parse(input) {
                         Some(res) => {
-                            input.resolve_choice_success(choice_start, branch_start);
-
                             return Some(res);
                         },
                         None => {
-                            if input.position != partial.position {
-                                input.suggestions.drain(
-                                    choice_start.suggestions_len..branch_start.suggestions_len
-                                );
-                                input.validation_errors.drain(
-                                    choice_start.validation_errors_len..branch_start.validation_errors_len
-                                );
-
-                                return None;
-                            }
-
-                            input.restore_partial(partial);
+                            input.rollback(checkpoint);
                         }
                     }
                 )*
