@@ -370,11 +370,11 @@ impl<'a> Stream<'a> {
         range: R,
         expectation: &Expectation,
     ) {
-        let range = range.into();
-
         if self.can_suggest_at_position
             && let Some(cursor) = self.cursor
         {
+            let range = range.into();
+
             if let Some(force_suggest_range) = self.force_suggest_range.take()
                 && cursor >= force_suggest_range.start
                 && cursor <= force_suggest_range.end
@@ -408,7 +408,10 @@ impl<'a> Stream<'a> {
     #[must_use]
     pub fn fail_expected<T>(&mut self, expectation: &Expectation) -> Option<T> {
         let _ = self.fail::<T>();
-        self.max_error.expected.push(*expectation);
+
+        if self.position == self.max_error.span.start {
+            self.max_error.expected.push(*expectation);
+        }
 
         None
     }
@@ -897,14 +900,11 @@ where
             };
 
             match self.parse(input) {
-                Some(val) => {
-                    if input.position == start_position {
-                        input.add_suggestion(input.position, &expected);
-                    }
-                    Some(val)
-                }
+                Some(val) => Some(val),
                 None => {
-                    if input.position == start_position {
+                    if input.position == start_position
+                        && input.max_error.span.start == start_position
+                    {
                         input.max_error.expected.truncate(pre_parse_error_len);
                         input.max_error.expected.push(expected);
                     }
@@ -921,7 +921,9 @@ where
             match self.parse(input) {
                 Some(val) => Some(val),
                 None => {
-                    if input.position == start_position {
+                    if input.position == start_position
+                        && input.max_error.span.start == start_position
+                    {
                         input.max_error.expected.push(expected);
                     }
 
@@ -968,16 +970,25 @@ where
         C: Default + Accumulate<T>,
     {
         move |input: &mut Stream<'a>| {
-            let partial = input.save_partial();
+            let start_checkpoint = input.checkpoint();
 
-            let (advanced, first) = match self.parse(input) {
-                Some(first) => (input.position != partial.position, first),
+            let first = match self.parse(input) {
+                Some(first) => first,
                 None => {
-                    if input.position != partial.position {
+                    if input.position != start_checkpoint.position {
                         return None;
                     }
 
-                    input.restore_partial(partial);
+                    let suggestions_len = start_checkpoint.suggestions_len;
+                    let preserved_suggestions = if input.suggestions.len() > suggestions_len {
+                        input.suggestions.split_off(suggestions_len)
+                    } else {
+                        Vec::new()
+                    };
+
+                    input.rollback(start_checkpoint);
+
+                    input.suggestions.extend(preserved_suggestions);
 
                     return Some(C::default());
                 }
@@ -986,41 +997,37 @@ where
             let mut collection = C::default();
             collection.accumulate(first);
 
-            if !advanced {
+            if input.position == start_checkpoint.position {
                 return Some(collection);
             }
 
             loop {
-                let separator_partial = input.save_partial();
+                let before_separator = input.checkpoint();
 
                 match separator.parse(input) {
                     Some(_) => {
-                        let partial = input.save_partial();
+                        let before_item = input.checkpoint();
 
                         match self.parse(input) {
                             Some(next) => {
                                 collection.accumulate(next);
 
-                                if input.position == partial.position {
+                                if input.position == before_item.position {
                                     break;
                                 }
                             }
                             None => {
-                                if input.position != partial.position {
+                                if input.position != before_item.position {
                                     return None;
                                 }
 
-                                input.restore_partial(separator_partial);
+                                input.rollback(before_separator);
                                 break;
                             }
                         }
                     }
                     None => {
-                        if input.position != separator_partial.position {
-                            return None;
-                        }
-
-                        input.restore_partial(separator_partial);
+                        input.rollback(before_separator);
 
                         break;
                     }
@@ -1037,16 +1044,24 @@ where
         C: Default + Accumulate<T>,
     {
         move |input: &mut Stream<'a>| {
-            let partial = input.save_partial();
+            let start_checkpoint = input.checkpoint();
 
-            let (advanced, first) = match self.parse(input) {
-                Some(first) => (input.position != partial.position, first),
+            let first = match self.parse(input) {
+                Some(first) => first,
                 None => {
-                    if input.position != partial.position {
+                    if input.position != start_checkpoint.position {
                         return None;
                     }
 
-                    input.restore_partial(partial);
+                    let suggestions_len = start_checkpoint.suggestions_len;
+                    let preserved_suggestions = if input.suggestions.len() > suggestions_len {
+                        input.suggestions.split_off(suggestions_len)
+                    } else {
+                        Vec::new()
+                    };
+
+                    input.rollback(start_checkpoint);
+                    input.suggestions.extend(preserved_suggestions);
 
                     return Some(C::default());
                 }
@@ -1055,46 +1070,41 @@ where
             let mut collection = C::default();
             collection.accumulate(first);
 
-            if !advanced {
+            if input.position == start_checkpoint.position {
                 return Some(collection);
             }
 
             loop {
-                let partial = input.save_partial();
+                let before_separator = input.checkpoint();
 
                 match separator.parse(input) {
                     Some(_) => {
-                        if input.position == partial.position {
+                        if input.position == before_separator.position {
                             break;
                         }
 
-                        let partial = input.save_partial();
+                        let before_item = input.checkpoint();
 
                         match self.parse(input) {
                             Some(next) => {
                                 collection.accumulate(next);
 
-                                if input.position == partial.position {
+                                if input.position == before_item.position {
                                     break;
                                 }
                             }
                             None => {
-                                if input.position != partial.position {
+                                if input.position != before_item.position {
                                     return None;
                                 }
 
-                                input.restore_partial(partial);
-
+                                input.rollback(before_item);
                                 break;
                             }
                         }
                     }
                     None => {
-                        if input.position != partial.position {
-                            return None;
-                        }
-
-                        input.restore_partial(partial);
+                        input.rollback(before_separator);
 
                         break;
                     }
@@ -1113,10 +1123,11 @@ where
         move |input: &mut Stream<'a>| {
             let mut collection = C::default();
 
-            let start = input.position;
-            let first = self.parse(input)?;
-            let advanced = input.position != start;
+            let start_checkpoint = input.checkpoint();
 
+            let first = self.parse(input)?;
+
+            let advanced = input.position != start_checkpoint.position;
             collection.accumulate(first);
 
             if !advanced {
@@ -1124,30 +1135,33 @@ where
             }
 
             loop {
-                let partial = input.save_partial();
+                let before_separator = input.checkpoint();
                 match separator.parse(input) {
                     Some(_) => {
-                        if input.position == partial.position {
+                        if input.position == before_separator.position {
                             break;
                         }
 
-                        let partial = input.save_partial();
+                        let before_item = input.checkpoint();
                         match self.parse(input) {
                             Some(next) => {
                                 collection.accumulate(next);
-                                if input.position == partial.position {
+                                if input.position == before_item.position {
                                     break;
                                 }
                             }
                             None => {
-                                return None;
+                                if input.position != before_item.position {
+                                    return None;
+                                }
+                                input.rollback(before_separator);
+                                break;
                             }
                         }
                     }
                     None => {
-                        if input.position != partial.position {
-                            return None;
-                        }
+                        input.rollback(before_separator);
+
                         break;
                     }
                 }
@@ -1171,11 +1185,11 @@ where
             let mut collection = C::default();
             let mut count = 0;
 
-            let partial = input.save_partial();
+            let start_checkpoint = input.checkpoint();
 
             match self.parse(input) {
                 Some(first) => {
-                    let advanced = input.position != partial.position;
+                    let advanced = input.position != start_checkpoint.position;
                     collection.accumulate(first);
                     count += 1;
 
@@ -1191,6 +1205,9 @@ where
                     if min > 0 {
                         return None;
                     } else {
+                        if input.position == start_checkpoint.position {
+                            input.rollback(start_checkpoint);
+                        }
                         return Some(collection);
                     }
                 }
@@ -1201,35 +1218,40 @@ where
                     break;
                 }
 
-                let partial = input.save_partial();
+                let before_separator = input.checkpoint();
                 match separator.parse(input) {
                     Some(_) => {
-                        if input.position == partial.position {
+                        if input.position == before_separator.position {
                             break;
                         }
 
-                        let partial = input.save_partial();
+                        let before_item = input.checkpoint();
 
                         match self.parse(input) {
                             Some(next) => {
                                 collection.accumulate(next);
                                 count += 1;
 
-                                if input.position == partial.position {
+                                if input.position == before_item.position {
                                     break;
                                 }
                             }
                             None => {
-                                return None;
+                                if input.position != before_item.position {
+                                    return None;
+                                }
+                                input.rollback(before_separator);
+                                break;
                             }
                         }
                     }
                     None => {
-                        if count >= min && input.position == partial.position {
-                            break;
-                        } else {
+                        input.rollback(before_separator);
+
+                        if count < min {
                             return None;
                         }
+                        break;
                     }
                 }
             }
@@ -1918,18 +1940,62 @@ macro_rules! impl_choice_tuple {
             $($name: FnParser<'a, T>),*
         {
             fn parse(&mut self, input: &mut Stream<'a>) -> Option<T> {
-                $(
-                    let checkpoint = input.checkpoint();
+                let start_checkpoint = input.checkpoint();
 
-                    match self.$idx.parse(input) {
-                        Some(res) => {
-                            return Some(res);
-                        },
-                        None => {
-                            input.rollback(checkpoint);
+                let mut best_success_pos = start_checkpoint.position;
+                let mut best_success_result: Option<T> = None;
+                let mut best_success_meta = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+                let mut best_success_state = (
+                    start_checkpoint.signatures_depth,
+                    start_checkpoint.can_suggest_at_position,
+                    start_checkpoint.force_suggest_range
+                );
+
+                $(
+                    let result = self.$idx.parse(input);
+
+                    if let Some(res) = result {
+                        if best_success_result.is_none() || input.position > best_success_pos {
+                            best_success_pos = input.position;
+                            best_success_result = Some(res);
+
+                            best_success_meta.0 = if input.suggestions.len() > start_checkpoint.suggestions_len {
+                                input.suggestions[start_checkpoint.suggestions_len..].to_vec()
+                            } else { Vec::new() };
+                            best_success_meta.1 = if input.validation_errors.len() > start_checkpoint.validation_errors_len {
+                                input.validation_errors[start_checkpoint.validation_errors_len..].to_vec()
+                            } else { Vec::new() };
+                            best_success_meta.2 = if input.signatures.len() > start_checkpoint.signatures_len {
+                                input.signatures[start_checkpoint.signatures_len..].to_vec()
+                            } else { Vec::new() };
+                            best_success_meta.3 = if input.semantic_tokens.len() > start_checkpoint.semantic_tokens_len {
+                                input.semantic_tokens[start_checkpoint.semantic_tokens_len..].to_vec()
+                            } else { Vec::new() };
+
+                            best_success_state = (
+                                input.signatures_depth,
+                                input.can_suggest_at_position,
+                                input.force_suggest_range
+                            );
                         }
                     }
+
+                    input.rollback(start_checkpoint);
                 )*
+
+                if let Some(result) = best_success_result {
+                    input.position = best_success_pos;
+                    input.suggestions.extend(best_success_meta.0);
+                    input.validation_errors.extend(best_success_meta.1);
+                    input.signatures.extend(best_success_meta.2);
+                    input.semantic_tokens.extend(best_success_meta.3);
+
+                    input.signatures_depth = best_success_state.0;
+                    input.can_suggest_at_position = best_success_state.1;
+                    input.force_suggest_range = best_success_state.2;
+
+                    return Some(result);
+                }
 
                 None
             }

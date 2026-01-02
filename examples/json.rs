@@ -1,5 +1,5 @@
 use parser_rs::{
-    FnParser, ParserRange, Stream, char, choice, digits, end_of_file, literal, take_while,
+    FnParser, ParserRange, Stream, char, choice, digits, end_of_file, suggest_literal, take_while,
 };
 use std::collections::{BTreeMap, HashSet};
 
@@ -27,13 +27,15 @@ where
 }
 
 fn parse_null(input: &mut Stream) -> Option<JsonValue> {
-    literal("null").map(|_| JsonValue::Null).parse(input)
+    suggest_literal("null")
+        .map(|_| JsonValue::Null)
+        .parse(input)
 }
 
 fn parse_bool(input: &mut Stream) -> Option<JsonValue> {
     choice((
-        literal("true").map(|_| JsonValue::Bool(true)),
-        literal("false").map(|_| JsonValue::Bool(false)),
+        suggest_literal("true").map(|_| JsonValue::Bool(true)),
+        suggest_literal("false").map(|_| JsonValue::Bool(false)),
     ))
     .parse(input)
 }
