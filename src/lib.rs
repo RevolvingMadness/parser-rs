@@ -1927,31 +1927,35 @@ macro_rules! impl_choice_tuple {
 
                 let mut best_success_pos = start_checkpoint.position;
                 let mut best_success_result: Option<T> = None;
-                let mut best_success_meta = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+                let mut best_success_meta: (Vec<ValidationError>, Vec<Signature>, Vec<SemanticToken>) = (Vec::new(), Vec::new(), Vec::new());
                 let mut best_success_state = (
                     start_checkpoint.signatures_depth,
                     start_checkpoint.can_suggest_at_position,
                     start_checkpoint.force_suggest_range
                 );
 
+                let mut all_suggestions: Vec<Suggestion> = Vec::new();
+
                 $(
                     let result = self.$idx.parse(input);
+
+                    if input.suggestions.len() > start_checkpoint.suggestions_len {
+                        let new_suggestions = input.suggestions[start_checkpoint.suggestions_len..].to_vec();
+                        all_suggestions.extend(new_suggestions);
+                    }
 
                     if let Some(res) = result {
                         if best_success_result.is_none() || input.position > best_success_pos {
                             best_success_pos = input.position;
                             best_success_result = Some(res);
 
-                            best_success_meta.0 = if input.suggestions.len() > start_checkpoint.suggestions_len {
-                                input.suggestions[start_checkpoint.suggestions_len..].to_vec()
-                            } else { Vec::new() };
-                            best_success_meta.1 = if input.validation_errors.len() > start_checkpoint.validation_errors_len {
+                            best_success_meta.0 = if input.validation_errors.len() > start_checkpoint.validation_errors_len {
                                 input.validation_errors[start_checkpoint.validation_errors_len..].to_vec()
                             } else { Vec::new() };
-                            best_success_meta.2 = if input.signatures.len() > start_checkpoint.signatures_len {
+                            best_success_meta.1 = if input.signatures.len() > start_checkpoint.signatures_len {
                                 input.signatures[start_checkpoint.signatures_len..].to_vec()
                             } else { Vec::new() };
-                            best_success_meta.3 = if input.semantic_tokens.len() > start_checkpoint.semantic_tokens_len {
+                            best_success_meta.2 = if input.semantic_tokens.len() > start_checkpoint.semantic_tokens_len {
                                 input.semantic_tokens[start_checkpoint.semantic_tokens_len..].to_vec()
                             } else { Vec::new() };
 
@@ -1968,10 +1972,24 @@ macro_rules! impl_choice_tuple {
 
                 if let Some(result) = best_success_result {
                     input.position = best_success_pos;
-                    input.suggestions.extend(best_success_meta.0);
-                    input.validation_errors.extend(best_success_meta.1);
-                    input.signatures.extend(best_success_meta.2);
-                    input.semantic_tokens.extend(best_success_meta.3);
+
+                    let should_add_all_suggestions = if let Some(cursor) = input.cursor {
+                        best_success_pos <= cursor
+                    } else {
+                        false
+                    };
+
+                    if should_add_all_suggestions {
+                        for suggestion in all_suggestions {
+                            if !input.suggestions.contains(&suggestion) {
+                                input.suggestions.push(suggestion);
+                            }
+                        }
+                    }
+
+                    input.validation_errors.extend(best_success_meta.0);
+                    input.signatures.extend(best_success_meta.1);
+                    input.semantic_tokens.extend(best_success_meta.2);
 
                     input.signatures_depth = best_success_state.0;
                     input.can_suggest_at_position = best_success_state.1;
@@ -1979,6 +1997,8 @@ macro_rules! impl_choice_tuple {
 
                     return Some(result);
                 }
+
+                input.suggestions.extend(all_suggestions);
 
                 None
             }
