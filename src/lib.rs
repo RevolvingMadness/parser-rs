@@ -2041,3 +2041,263 @@ where
 {
     parser
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(test)]
+    mod semantic_token_tests {
+        use super::*;
+
+        pub fn parser_1(input: &mut Stream) -> Option<()> {
+            choice((
+                |input: &mut Stream| {
+                    suggest_literal("first")
+                        .syntax(SemanticTokenKind::Function)
+                        .parse(input)?;
+                    suggest_literal("second").parse(input)?;
+
+                    Some(())
+                },
+                suggest_literal("first")
+                    .map_to(())
+                    .syntax(SemanticTokenKind::Variable),
+            ))
+            .parse(input)
+        }
+
+        #[test]
+        pub fn test_semantic_variable() {
+            let input = "first";
+            let mut input = Stream::new(input, Some(input.len()), None);
+            input.semantic_tokens_enabled = true;
+
+            let result = parser_1(&mut input);
+            assert!(result.is_some());
+            assert_eq!(
+                input.semantic_tokens,
+                vec![SemanticToken {
+                    range: (0..5).into(),
+                    kind: SemanticTokenKind::Variable,
+                }]
+            );
+        }
+
+        #[test]
+        pub fn test_semantic_function() {
+            let input = "firstsecond";
+            let mut input = Stream::new(input, Some(input.len()), None);
+            input.semantic_tokens_enabled = true;
+
+            let result = parser_1(&mut input);
+            assert!(result.is_some());
+            assert_eq!(
+                input.semantic_tokens,
+                vec![SemanticToken {
+                    range: (0..5).into(),
+                    kind: SemanticTokenKind::Function,
+                }]
+            );
+        }
+    }
+
+    #[cfg(test)]
+    mod choice_suggestion_tests {
+        use super::*;
+
+        pub fn suggestion_parser_1(input: &mut Stream) -> Option<()> {
+            choice((
+                |input: &mut Stream| {
+                    suggest_literal("first").parse(input)?;
+                    suggest_literal("second").parse(input)
+                },
+                suggest_literal("first"),
+            ))
+            .map_to(())
+            .parse(input)
+        }
+
+        #[test]
+        pub fn test_suggest_second() {
+            let input = "first";
+            let mut input = Stream::new(input, Some(input.len()), None);
+
+            let result = suggestion_parser_1(&mut input);
+            assert!(result.is_some());
+            assert_eq!(
+                input.suggestions,
+                vec![Suggestion {
+                    range: (5..11).into(),
+                    expected: Expectation::Literal("second")
+                }]
+            );
+        }
+
+        pub fn suggestion_parser_2(input: &mut Stream) -> Option<()> {
+            choice((suggest_literal("a"), suggest_literal("b")))
+                .separated_by::<_, _, ()>(suggest_literal("i"))
+                .parse(input)
+        }
+
+        #[test]
+        pub fn test_no_suggestions() {
+            let input = "a";
+            let mut input = Stream::new(input, Some(0), None);
+
+            let result = suggestion_parser_2(&mut input);
+            assert!(result.is_some());
+            assert_eq!(input.suggestions, vec![]);
+        }
+
+        pub fn suggestion_parser_3(input: &mut Stream) -> Option<()> {
+            choice((suggest_literal("a"), suggest_literal("b")))
+                .map_to(())
+                .parse(input)
+        }
+
+        #[test]
+        pub fn test_suggest_a_and_b() {
+            let input = "";
+            let mut input = Stream::new(input, Some(0), None);
+
+            let result = suggestion_parser_3(&mut input);
+            assert!(result.is_none());
+            assert_eq!(
+                input.suggestions,
+                vec![
+                    Suggestion {
+                        range: (0..1).into(),
+                        expected: Expectation::Literal("a")
+                    },
+                    Suggestion {
+                        range: (0..1).into(),
+                        expected: Expectation::Literal("b")
+                    }
+                ]
+            );
+        }
+    }
+
+    #[cfg(test)]
+    mod whitespace_tests {
+        use super::*;
+
+        fn parser_no_whitespace<'a>(input: &mut Stream<'a>) -> Option<&'a str> {
+            let r = choice((
+                literal("command1").syntax(SemanticTokenKind::Variable),
+                |input: &mut Stream| {
+                    literal("command1").syntax_keyword().parse(input)?;
+                    literal(" ").parse(input)?;
+                    literal("argument").parse(input)
+                },
+            ))
+            .parse(input)?;
+
+            Some(r)
+        }
+
+        #[test]
+        pub fn test_no_ws_variable() {
+            let input = "command1";
+            let mut input = Stream::new(input, Some(0), None);
+            input.semantic_tokens_enabled = true;
+
+            let result = parser_no_whitespace.parse_with_eof(&mut input);
+            assert!(result.is_some());
+            assert_eq!(
+                input.semantic_tokens,
+                vec![SemanticToken {
+                    range: (0..8).into(),
+                    kind: SemanticTokenKind::Variable
+                }]
+            )
+        }
+
+        #[test]
+        pub fn test_no_ws_keyword() {
+            let input = "command1 ";
+            let mut input = Stream::new(input, Some(0), None);
+            input.semantic_tokens_enabled = true;
+
+            let result = parser_no_whitespace.parse_with_eof(&mut input);
+            assert!(result.is_none());
+            assert_eq!(
+                input.semantic_tokens,
+                vec![SemanticToken {
+                    range: (0..8).into(),
+                    kind: SemanticTokenKind::Variable
+                }]
+            )
+        }
+
+        fn parser_whitespace<'a>(input: &mut Stream<'a>) -> Option<&'a str> {
+            let r = choice((
+                literal("command1").syntax(SemanticTokenKind::Variable),
+                |input: &mut Stream| {
+                    literal("command1")
+                        .syntax(SemanticTokenKind::Keyword)
+                        .parse(input)?;
+                    literal(" ").parse(input)?;
+                    literal("argument").parse(input)
+                },
+            ))
+            .parse(input)?;
+
+            literal(" ").optional().parse(input)?;
+
+            Some(r)
+        }
+
+        #[test]
+        pub fn test_ws_variable_1() {
+            let input = "command1";
+            let mut input = Stream::new(input, Some(0), None);
+            input.semantic_tokens_enabled = true;
+
+            let result = parser_whitespace.parse_with_eof(&mut input);
+            assert!(result.is_some());
+            assert_eq!(
+                input.semantic_tokens,
+                vec![SemanticToken {
+                    range: (0..8).into(),
+                    kind: SemanticTokenKind::Variable
+                }]
+            )
+        }
+
+        #[test]
+        pub fn test_ws_variable_2() {
+            let input = "command1 ";
+            let mut input = Stream::new(input, Some(0), None);
+            input.semantic_tokens_enabled = true;
+
+            let result = parser_whitespace.parse_with_eof(&mut input);
+            assert!(result.is_some());
+            assert_eq!(
+                input.semantic_tokens,
+                vec![SemanticToken {
+                    range: (0..8).into(),
+                    kind: SemanticTokenKind::Variable
+                }]
+            )
+        }
+
+        #[test]
+        pub fn test_ws_function_1() {
+            let input = "command1 argument";
+            let mut input = Stream::new(input, Some(0), None);
+            input.semantic_tokens_enabled = true;
+
+            let result = parser_whitespace.parse_with_eof(&mut input);
+            assert!(result.is_some());
+            assert_eq!(
+                input.semantic_tokens,
+                vec![SemanticToken {
+                    range: (0..8).into(),
+                    kind: SemanticTokenKind::Keyword
+                }]
+            )
+        }
+    }
+}
