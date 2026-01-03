@@ -703,20 +703,6 @@ where
         }
     }
 
-    fn attempt(mut self) -> impl FnParser<'a, Option<T>> {
-        move |input: &mut Stream<'a>| {
-            let checkpoint = input.checkpoint();
-
-            match self.parse(input) {
-                Some(val) => Some(Some(val)),
-                None => {
-                    input.rollback(checkpoint);
-                    None
-                }
-            }
-        }
-    }
-
     fn dont_suggest_if(&mut self, shouldnt_suggest: bool) -> impl FnParser<'a, T> {
         move |input: &mut Stream<'a>| {
             if shouldnt_suggest {
@@ -1270,33 +1256,30 @@ where
         move |input: &mut Stream<'a>| {
             let start = input.position;
 
-            match self.parse(input) {
-                Some(value) => {
-                    if !input.semantic_tokens_enabled {
-                        return Some(value);
-                    }
+            let result = self.parse(input);
 
-                    let token_range = ParserRange {
-                        start,
-                        end: input.position,
-                    };
-
-                    let should_add = match &input.semantic_tokens_range {
-                        Some(request_range) => token_range.overlaps(*request_range),
-                        None => true,
-                    };
-
-                    if should_add {
-                        input.semantic_tokens.push(SemanticToken {
-                            range: token_range,
-                            kind,
-                        });
-                    }
-
-                    Some(value)
-                }
-                None => None,
+            if result.is_none() || !input.semantic_tokens_enabled {
+                return result;
             }
+
+            let token_range = ParserRange {
+                start,
+                end: input.position,
+            };
+
+            let should_add = match &input.semantic_tokens_range {
+                Some(request_range) => token_range.overlaps(*request_range),
+                None => true,
+            };
+
+            if should_add {
+                input.semantic_tokens.push(SemanticToken {
+                    range: token_range,
+                    kind,
+                });
+            }
+
+            result
         }
     }
 
