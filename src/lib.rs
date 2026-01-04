@@ -247,7 +247,7 @@ impl<'a> Stream<'a> {
     }
 
     pub fn add_syntax_from(&mut self, start: usize, kind: SemanticTokenKind) {
-        if !self.semantic_tokens_enabled {
+        if !self.semantic_tokens_enabled || self.position == start {
             return;
         }
 
@@ -1258,7 +1258,7 @@ where
 
             let result = self.parse(input);
 
-            if result.is_none() || !input.semantic_tokens_enabled {
+            if result.is_none() || !input.semantic_tokens_enabled || input.position == start {
                 return result;
             }
 
