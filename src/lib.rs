@@ -231,7 +231,22 @@ impl<'a> Stream<'a> {
     }
 
     #[inline(always)]
-    pub fn rollback(&mut self, checkpoint: Checkpoint) {
+    pub fn partial_rollback(&mut self, checkpoint: Checkpoint) {
+        self.position = checkpoint.position;
+
+        self.validation_errors
+            .truncate(checkpoint.validation_errors_len);
+        self.signatures.truncate(checkpoint.signatures_len);
+        self.semantic_tokens
+            .truncate(checkpoint.semantic_tokens_len);
+
+        self.signatures_depth = checkpoint.signatures_depth;
+        self.can_suggest_at_position = checkpoint.can_suggest_at_position;
+        self.force_suggest_range = checkpoint.force_suggest_range;
+    }
+
+    #[inline(always)]
+    pub fn full_rollback(&mut self, checkpoint: Checkpoint) {
         self.position = checkpoint.position;
 
         self.suggestions.truncate(checkpoint.suggestions_len);
@@ -696,7 +711,7 @@ where
                 Some(val) => Some(Some(val)),
 
                 None => {
-                    input.rollback(checkpoint);
+                    input.partial_rollback(checkpoint);
                     Some(None)
                 }
             }
@@ -972,7 +987,7 @@ where
                         Vec::new()
                     };
 
-                    input.rollback(start_checkpoint);
+                    input.full_rollback(start_checkpoint);
 
                     input.suggestions.extend(preserved_suggestions);
 
@@ -1007,13 +1022,13 @@ where
                                     return None;
                                 }
 
-                                input.rollback(before_separator);
+                                input.full_rollback(before_separator);
                                 break;
                             }
                         }
                     }
                     None => {
-                        input.rollback(before_separator);
+                        input.full_rollback(before_separator);
 
                         break;
                     }
@@ -1046,7 +1061,7 @@ where
                         Vec::new()
                     };
 
-                    input.rollback(start_checkpoint);
+                    input.full_rollback(start_checkpoint);
                     input.suggestions.extend(preserved_suggestions);
 
                     return Some(C::default());
@@ -1084,13 +1099,13 @@ where
                                     return None;
                                 }
 
-                                input.rollback(before_item);
+                                input.full_rollback(before_item);
                                 break;
                             }
                         }
                     }
                     None => {
-                        input.rollback(before_separator);
+                        input.full_rollback(before_separator);
 
                         break;
                     }
@@ -1140,13 +1155,13 @@ where
                                 if input.position != before_item.position {
                                     return None;
                                 }
-                                input.rollback(before_separator);
+                                input.full_rollback(before_separator);
                                 break;
                             }
                         }
                     }
                     None => {
-                        input.rollback(before_separator);
+                        input.full_rollback(before_separator);
 
                         break;
                     }
@@ -1192,7 +1207,7 @@ where
                         return None;
                     } else {
                         if input.position == start_checkpoint.position {
-                            input.rollback(start_checkpoint);
+                            input.full_rollback(start_checkpoint);
                         }
                         return Some(collection);
                     }
@@ -1226,13 +1241,13 @@ where
                                 if input.position != before_item.position {
                                     return None;
                                 }
-                                input.rollback(before_separator);
+                                input.full_rollback(before_separator);
                                 break;
                             }
                         }
                     }
                     None => {
-                        input.rollback(before_separator);
+                        input.full_rollback(before_separator);
 
                         if count < min {
                             return None;
@@ -1967,7 +1982,7 @@ macro_rules! impl_choice_tuple {
                         }
                     }
 
-                    input.rollback(start_checkpoint);
+                    input.full_rollback(start_checkpoint);
                 )*
 
                 if let Some(result) = best_success_result {
