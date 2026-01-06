@@ -169,6 +169,14 @@ pub struct Checkpoint {
     pub force_suggest_range: Option<ParserRange>,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct StreamConfig {
+    pub semantic_tokens: bool,
+    pub max_validation_errors: usize,
+    pub validation_errors: bool,
+    pub signatures: bool,
+}
+
 #[derive(Debug)]
 pub struct Stream<'a> {
     pub input: &'a str,
@@ -182,13 +190,10 @@ pub struct Stream<'a> {
     pub force_suggest_range: Option<ParserRange>,
     pub semantic_tokens: Vec<SemanticToken>,
     pub semantic_tokens_range: Option<ParserRange>,
-    pub semantic_tokens_enabled: bool,
-    pub max_validation_errors: usize,
-    pub validation_errors_enabled: bool,
-    pub signature_help_enabled: bool,
     pub active_parameter: Option<Option<usize>>,
     pub signatures: Vec<Signature>,
     pub signatures_depth: usize,
+    pub config: StreamConfig,
 }
 
 impl<'a> Stream<'a> {
@@ -207,15 +212,12 @@ impl<'a> Stream<'a> {
             validation_errors: Vec::new(),
             can_suggest_at_position: true,
             force_suggest_range: None,
-            max_validation_errors: max_validation_errors.unwrap_or(0),
-            validation_errors_enabled: max_validation_errors.is_some(),
-            semantic_tokens_enabled: false,
             semantic_tokens: Vec::new(),
             semantic_tokens_range: None,
-            signature_help_enabled: false,
             signatures: Vec::new(),
             active_parameter: None,
             signatures_depth: 0,
+            config: StreamConfig::default(),
         }
     }
 
@@ -265,7 +267,7 @@ impl<'a> Stream<'a> {
     }
 
     pub fn add_syntax_from(&mut self, start: usize, kind: SemanticTokenKind) {
-        if !self.semantic_tokens_enabled || self.position == start {
+        if !self.config.semantic_tokens || self.position == start {
             return;
         }
 
@@ -515,8 +517,8 @@ impl<'a> Stream<'a> {
         span: R,
         message: M,
     ) {
-        if self.validation_errors_enabled
-            && self.validation_errors.len() < self.max_validation_errors
+        if self.config.validation_errors
+            && self.validation_errors.len() < self.config.max_validation_errors
         {
             self.validation_errors.push(ValidationError {
                 span: span.into(),
@@ -532,8 +534,8 @@ impl<'a> Stream<'a> {
         R: Into<ParserRange>,
         M: ToString,
     {
-        if self.validation_errors_enabled
-            && self.validation_errors.len() < self.max_validation_errors
+        if self.config.validation_errors
+            && self.validation_errors.len() < self.config.max_validation_errors
         {
             self.validation_errors.push(ValidationError {
                 span: span.into(),
@@ -577,7 +579,7 @@ where
         )],
     ) -> impl FnParser<'a, T> {
         move |input: &mut Stream<'a>| {
-            if !input.signature_help_enabled {
+            if !input.config.signatures {
                 return self.parse(input);
             }
 
@@ -619,7 +621,7 @@ where
 
     fn signature(mut self, commit_signature: usize) -> impl FnParser<'a, T> {
         move |input: &mut Stream<'a>| {
-            if !input.signature_help_enabled {
+            if !input.config.signatures {
                 return self.parse(input);
             }
 
@@ -673,7 +675,7 @@ where
 
     fn next_signature_parameter(mut self) -> impl FnParser<'a, T> {
         move |input: &mut Stream<'a>| {
-            if !input.signature_help_enabled {
+            if !input.config.signatures {
                 return self.parse(input);
             }
             let Some(cursor) = input.cursor else {
@@ -1277,7 +1279,7 @@ where
 
             let result = self.parse(input);
 
-            if result.is_none() || !input.semantic_tokens_enabled || input.position == start {
+            if result.is_none() || !input.config.semantic_tokens || input.position == start {
                 return result;
             }
 
@@ -2090,7 +2092,7 @@ mod tests {
         pub fn test_semantic_variable() {
             let input = "first";
             let mut input = Stream::new(input, Some(input.len()), None);
-            input.semantic_tokens_enabled = true;
+            input.config.semantic_tokens = true;
 
             let result = parser_1(&mut input);
             assert!(result.is_some());
@@ -2107,7 +2109,7 @@ mod tests {
         pub fn test_semantic_function() {
             let input = "firstsecond";
             let mut input = Stream::new(input, Some(input.len()), None);
-            input.semantic_tokens_enabled = true;
+            input.config.semantic_tokens = true;
 
             let result = parser_1(&mut input);
             assert!(result.is_some());
@@ -2222,7 +2224,7 @@ mod tests {
         pub fn test_no_ws_variable() {
             let input = "command1";
             let mut input = Stream::new(input, Some(0), None);
-            input.semantic_tokens_enabled = true;
+            input.config.semantic_tokens = true;
 
             let result = parser_no_whitespace.parse_with_eof(&mut input);
             assert!(result.is_some());
@@ -2239,7 +2241,7 @@ mod tests {
         pub fn test_no_ws_keyword() {
             let input = "command1 ";
             let mut input = Stream::new(input, Some(0), None);
-            input.semantic_tokens_enabled = true;
+            input.config.semantic_tokens = true;
 
             let result = parser_no_whitespace.parse_with_eof(&mut input);
             assert!(result.is_none());
@@ -2277,7 +2279,7 @@ mod tests {
         pub fn test_ws_variable_1() {
             let input = "command1";
             let mut input = Stream::new(input, Some(0), None);
-            input.semantic_tokens_enabled = true;
+            input.config.semantic_tokens = true;
 
             let result = parser_whitespace.parse_with_eof(&mut input);
             assert!(result.is_some());
@@ -2294,7 +2296,7 @@ mod tests {
         pub fn test_ws_variable_2() {
             let input = "command1 ";
             let mut input = Stream::new(input, Some(0), None);
-            input.semantic_tokens_enabled = true;
+            input.config.semantic_tokens = true;
 
             let result = parser_whitespace.parse_with_eof(&mut input);
             assert!(result.is_some());
@@ -2311,7 +2313,7 @@ mod tests {
         pub fn test_ws_function_1() {
             let input = "command1 argument";
             let mut input = Stream::new(input, Some(0), None);
-            input.semantic_tokens_enabled = true;
+            input.config.semantic_tokens = true;
 
             let result = parser_whitespace.parse_with_eof(&mut input);
             assert!(result.is_some());
@@ -2537,7 +2539,7 @@ mod tests {
         fn semantic_variable() {
             let input = "first";
             let mut input = Stream::new(input, None, None);
-            input.semantic_tokens_enabled = true;
+            input.config.semantic_tokens = true;
 
             let result = complex_parser_1(&mut input);
 
@@ -2555,7 +2557,7 @@ mod tests {
         fn semantic_function() {
             let input = "firstsecond";
             let mut input = Stream::new(input, None, None);
-            input.semantic_tokens_enabled = true;
+            input.config.semantic_tokens = true;
 
             let result = complex_parser_1(&mut input);
 
@@ -2589,7 +2591,7 @@ mod tests {
         fn semantic_function_2() {
             let input = "firstsecond";
             let mut input = Stream::new(input, None, None);
-            input.semantic_tokens_enabled = true;
+            input.config.semantic_tokens = true;
 
             let result = complex_parser_2(&mut input);
 
@@ -2607,7 +2609,7 @@ mod tests {
         fn semantic_variable_2() {
             let input = "first";
             let mut input: Stream<'_> = Stream::new(input, None, None);
-            input.semantic_tokens_enabled = true;
+            input.config.semantic_tokens = true;
 
             let result = complex_parser_2(&mut input);
 
