@@ -44,10 +44,16 @@ impl SemanticToken {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct ParserRange {
     pub start: usize,
     pub end: usize,
+}
+
+impl Default for ParserRange {
+    fn default() -> Self {
+        Self { start: 0, end: 1 }
+    }
 }
 
 impl Display for ParserRange {
@@ -104,11 +110,12 @@ pub enum Expectation {
     EndOfFile,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ParseError {
     pub span: ParserRange,
     pub messages: Vec<&'static str>,
     pub expected: Vec<Expectation>,
+    pub semantic_tokens: Vec<SemanticToken>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -195,11 +202,7 @@ impl<'a> Stream<'a> {
             bytes: input.as_bytes(),
             position: 0,
             cursor: completion_target,
-            max_error: ParseError {
-                span: ParserRange { start: 0, end: 1 },
-                messages: Vec::new(),
-                expected: Vec::new(),
-            },
+            max_error: ParseError::default(),
             suggestions: Vec::new(),
             validation_errors: Vec::new(),
             can_suggest_at_position: true,
@@ -440,6 +443,7 @@ impl<'a> Stream<'a> {
             };
             self.max_error.messages.clear();
             self.max_error.expected.clear();
+            self.max_error.semantic_tokens = self.semantic_tokens.clone();
         }
 
         None
@@ -2079,7 +2083,7 @@ mod tests {
                     .map_to(())
                     .syntax(SemanticTokenKind::Variable),
             ))
-            .parse(input)
+            .parse_with_eof(input)
         }
 
         #[test]
@@ -2130,7 +2134,7 @@ mod tests {
                 suggest_literal("first"),
             ))
             .map_to(())
-            .parse(input)
+            .parse_with_eof(input)
         }
 
         #[test]
@@ -2152,7 +2156,7 @@ mod tests {
         pub fn suggestion_parser_2(input: &mut Stream) -> Option<()> {
             choice((suggest_literal("a"), suggest_literal("b")))
                 .separated_by::<_, _, ()>(suggest_literal("i"))
-                .parse(input)
+                .parse_with_eof(input)
         }
 
         #[test]
@@ -2168,7 +2172,7 @@ mod tests {
         pub fn suggestion_parser_3(input: &mut Stream) -> Option<()> {
             choice((suggest_literal("a"), suggest_literal("b")))
                 .map_to(())
-                .parse(input)
+                .parse_with_eof(input)
         }
 
         #[test]
@@ -2202,12 +2206,14 @@ mod tests {
             let r = choice((
                 literal("command1").syntax(SemanticTokenKind::Variable),
                 |input: &mut Stream| {
-                    literal("command1").syntax_keyword().parse(input)?;
+                    literal("command1")
+                        .syntax(SemanticTokenKind::Function)
+                        .parse(input)?;
                     literal(" ").parse(input)?;
                     literal("argument").parse(input)
                 },
             ))
-            .parse(input)?;
+            .parse_with_eof(input)?;
 
             Some(r)
         }
@@ -2238,30 +2244,33 @@ mod tests {
             let result = parser_no_whitespace.parse_with_eof(&mut input);
             assert!(result.is_none());
             assert_eq!(
-                input.semantic_tokens,
+                input.max_error.semantic_tokens,
                 vec![SemanticToken {
                     range: (0..8).into(),
-                    kind: SemanticTokenKind::Variable
+                    kind: SemanticTokenKind::Function
                 }]
             )
         }
 
         fn parser_whitespace<'a>(input: &mut Stream<'a>) -> Option<&'a str> {
-            let r = choice((
-                literal("command1").syntax(SemanticTokenKind::Variable),
-                |input: &mut Stream| {
-                    literal("command1")
-                        .syntax(SemanticTokenKind::Keyword)
-                        .parse(input)?;
-                    literal(" ").parse(input)?;
-                    literal("argument").parse(input)
-                },
-            ))
-            .parse(input)?;
+            (|input: &mut Stream| {
+                let r = choice((
+                    literal("command1").syntax(SemanticTokenKind::Variable),
+                    |input: &mut Stream| {
+                        literal("command1")
+                            .syntax(SemanticTokenKind::Function)
+                            .parse(input)?;
+                        literal(" ").parse(input)?;
+                        literal("argument").parse(input)
+                    },
+                ))
+                .parse(input)?;
 
-            literal(" ").optional().parse(input)?;
+                literal(" ").optional().parse(input)?;
 
-            Some(r)
+                Some(r)
+            })
+            .parse_with_eof(input)
         }
 
         #[test]
@@ -2310,7 +2319,7 @@ mod tests {
                 input.semantic_tokens,
                 vec![SemanticToken {
                     range: (0..8).into(),
-                    kind: SemanticTokenKind::Keyword
+                    kind: SemanticTokenKind::Function
                 }]
             )
         }
@@ -2320,7 +2329,7 @@ mod tests {
         use super::*;
 
         fn parser<'a>(input: &mut Stream<'a>) -> Option<&'a str> {
-            suggest_literal("literal").parse(input)
+            suggest_literal("literal").parse_with_eof(input)
         }
 
         #[test]
@@ -2379,7 +2388,7 @@ mod tests {
         }
 
         fn complex_parser<'a>(input: &mut Stream<'a>) -> Option<Option<&'a str>> {
-            suggest_literal("literal").optional().parse(input)
+            suggest_literal("literal").optional().parse_with_eof(input)
         }
 
         #[test]
@@ -2398,7 +2407,7 @@ mod tests {
         use super::*;
 
         fn parser<'a>(input: &mut Stream<'a>) -> Option<&'a str> {
-            choice((suggest_literal("a"), suggest_literal("b"))).parse(input)
+            choice((suggest_literal("a"), suggest_literal("b"))).parse_with_eof(input)
         }
 
         #[test]
@@ -2586,7 +2595,7 @@ mod tests {
 
             assert!(result.is_none());
             assert_eq!(
-                input.semantic_tokens,
+                input.max_error.semantic_tokens,
                 vec![SemanticToken {
                     range: (0..5).into(),
                     kind: SemanticTokenKind::Function
