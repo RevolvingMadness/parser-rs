@@ -4,7 +4,7 @@ pub trait FnParserSeparatedBy<'a, T, C>
 where
     Self: Sized,
 {
-    fn separated_by<S, U>(mut self, mut separator: S) -> impl FnParser<'a>
+    fn separated_by<S>(mut self, mut separator: S) -> impl FnParser<'a>
     where
         S: FnParser<'a>,
         C: Default + Accumulate<T>,

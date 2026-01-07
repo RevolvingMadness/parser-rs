@@ -423,12 +423,12 @@ where
         }
     }
 
-    fn separated_by<Separator, SeparatorOutput, AccumulatedOutput>(
+    fn separated_by<Separator, AccumulatedOutput>(
         mut self,
         mut separator: Separator,
     ) -> impl FnParser<'a, Output = AccumulatedOutput>
     where
-        Separator: FnParser<'a, Output = SeparatorOutput>,
+        Separator: FnParser<'a>,
         AccumulatedOutput: Default + Accumulate<Self::Output>,
     {
         move |input: &mut Stream<'a>| {
@@ -500,10 +500,13 @@ where
         }
     }
 
-    fn separated_by_trailing<S, U, C>(mut self, mut separator: S) -> impl FnParser<'a, Output = C>
+    fn separated_by_trailing<Separator, AccumulatedOutput>(
+        mut self,
+        mut separator: Separator,
+    ) -> impl FnParser<'a, Output = AccumulatedOutput>
     where
-        S: FnParser<'a, Output = U>,
-        C: Default + Accumulate<Self::Output>,
+        Separator: FnParser<'a>,
+        AccumulatedOutput: Default + Accumulate<Self::Output>,
     {
         move |input: &mut Stream<'a>| {
             let start_checkpoint = input.checkpoint();
@@ -525,11 +528,11 @@ where
                     input.full_rollback(start_checkpoint);
                     input.suggestions.extend(preserved_suggestions);
 
-                    return Some(C::default());
+                    return Some(AccumulatedOutput::default());
                 }
             };
 
-            let mut collection = C::default();
+            let mut collection = AccumulatedOutput::default();
             collection.accumulate(first);
 
             if input.position == start_checkpoint.position {
@@ -577,13 +580,16 @@ where
         }
     }
 
-    fn separated_by_one<S, U, C>(mut self, mut separator: S) -> impl FnParser<'a, Output = C>
+    fn separated_by_one<Separator, AccumulatedOutput>(
+        mut self,
+        mut separator: Separator,
+    ) -> impl FnParser<'a, Output = AccumulatedOutput>
     where
-        S: FnParser<'a, Output = U>,
-        C: Default + Accumulate<Self::Output>,
+        Separator: FnParser<'a>,
+        AccumulatedOutput: Default + Accumulate<Self::Output>,
     {
         move |input: &mut Stream<'a>| {
-            let mut collection = C::default();
+            let mut collection = AccumulatedOutput::default();
 
             let start_checkpoint = input.checkpoint();
 
@@ -633,18 +639,18 @@ where
         }
     }
 
-    fn separated_by_range<S, U, C>(
+    fn separated_by_range<Separator, AccumulatedOutput>(
         mut self,
         min: usize,
         max: usize,
-        mut separator: S,
-    ) -> impl FnParser<'a, Output = C>
+        mut separator: Separator,
+    ) -> impl FnParser<'a, Output = AccumulatedOutput>
     where
-        S: FnParser<'a>,
-        C: Default + Accumulate<Self::Output>,
+        Separator: FnParser<'a>,
+        AccumulatedOutput: Default + Accumulate<Self::Output>,
     {
         move |input: &mut Stream<'a>| {
-            let mut collection = C::default();
+            let mut collection = AccumulatedOutput::default();
             let mut count = 0;
 
             let start_checkpoint = input.checkpoint();

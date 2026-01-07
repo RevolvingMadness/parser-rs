@@ -206,7 +206,7 @@ mod tests {
 
         pub fn suggestion_parser_2(input: Stream) -> ParseResult<()> {
             choice((suggest_literal("a"), suggest_literal("b")))
-                .separated_by::<_, _, ()>(suggest_literal("i"))
+                .separated_by::<_, ()>(suggest_literal("i"))
                 .parse_fully(input)
         }
 
