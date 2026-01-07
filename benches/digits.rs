@@ -1,7 +1,9 @@
 use chumsky::error::Rich;
 use chumsky::{Parser, extra};
 use criterion::{Criterion, criterion_group, criterion_main};
-use parser_rs::{FnParser, Stream, digits};
+use parser_rs::combinators::digits;
+use parser_rs::fn_parser::FnParser;
+use parser_rs::stream::Stream;
 use std::hint::black_box;
 
 fn criterion_benchmark(c: &mut Criterion) {

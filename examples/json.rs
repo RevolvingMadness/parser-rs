@@ -1,7 +1,13 @@
-use parser_rs::{
-    FnParser, ParserRange, Stream, char, choice, digits, end_of_file, suggest_literal, take_while,
-};
 use std::collections::{BTreeMap, HashSet};
+
+use parser_rs::{
+    combinators::{
+        char, choice::choice, digits, end_of_file, suggest_literal, take_while::take_while,
+    },
+    fn_parser::FnParser,
+    parser_range::ParserRange,
+    stream::Stream,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum JsonValue {
