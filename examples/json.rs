@@ -19,10 +19,9 @@ pub enum JsonValue {
     Object(BTreeMap<String, JsonValue>),
 }
 
-fn padded<'a, T, P>(mut parser: P) -> impl FnParser<'a, T>
+fn padded<'a, T, P>(mut parser: P) -> impl FnParser<'a, Output = T>
 where
-    P: FnParser<'a, T> + 'a,
-    T: 'a,
+    P: FnParser<'a, Output = T> + 'a,
 {
     move |input: &mut Stream<'a>| {
         let _ = take_while(char::is_whitespace).parse(input)?;

@@ -1,6 +1,6 @@
 use crate::{Expectation, fn_parser::FnParser, stream::Stream};
 
-pub fn take_while<'a, F>(predicate: F) -> impl FnParser<'a, &'a str>
+pub fn take_while<'a, F>(predicate: F) -> impl FnParser<'a, Output = &'a str>
 where
     F: Fn(char) -> bool,
 {
@@ -22,7 +22,7 @@ where
     }
 }
 
-pub fn take_while_bytes<'a, F>(predicate: F) -> impl FnParser<'a, &'a str>
+pub fn take_while_bytes<'a, F>(predicate: F) -> impl FnParser<'a, Output = &'a str>
 where
     F: Fn(u8) -> bool,
 {
@@ -41,7 +41,10 @@ where
     }
 }
 
-pub fn take_while_one<'a, F>(predicate: F, expected: Expectation) -> impl FnParser<'a, &'a str>
+pub fn take_while_one<'a, F>(
+    predicate: F,
+    expected: Expectation,
+) -> impl FnParser<'a, Output = &'a str>
 where
     F: Fn(char) -> bool,
 {
@@ -69,7 +72,7 @@ where
 pub fn take_while_one_bytes<'a, F>(
     predicate: F,
     expected: Expectation,
-) -> impl FnParser<'a, &'a str>
+) -> impl FnParser<'a, Output = &'a str>
 where
     F: Fn(u8) -> bool,
 {
@@ -96,7 +99,7 @@ pub fn take_while_range<'a, F>(
     min: usize,
     max: usize,
     expected: Expectation,
-) -> impl FnParser<'a, &'a str>
+) -> impl FnParser<'a, Output = &'a str>
 where
     F: Fn(char) -> bool,
 {
@@ -129,7 +132,7 @@ pub fn take_while_range_bytes<'a, F>(
     min: usize,
     max: usize,
     expected: Expectation,
-) -> impl FnParser<'a, &'a str>
+) -> impl FnParser<'a, Output = &'a str>
 where
     F: Fn(u8) -> bool,
 {

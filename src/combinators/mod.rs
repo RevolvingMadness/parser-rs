@@ -5,7 +5,7 @@ use crate::{
 pub mod choice;
 pub mod take_while;
 
-pub fn literal<'a>(literal: &'static str) -> impl FnParser<'a, &'static str> {
+pub fn literal<'a>(literal: &'static str) -> impl FnParser<'a, Output = &'static str> {
     move |input: &mut Stream<'a>| {
         if input.remaining_bytes().starts_with(literal.as_bytes()) {
             input.position += literal.len();
@@ -18,7 +18,7 @@ pub fn literal<'a>(literal: &'static str) -> impl FnParser<'a, &'static str> {
     }
 }
 
-pub fn suggest_literal<'a>(literal: &'static str) -> impl FnParser<'a, &'static str> {
+pub fn suggest_literal<'a>(literal: &'static str) -> impl FnParser<'a, Output = &'static str> {
     move |input: &mut Stream<'a>| {
         if input.remaining_bytes().starts_with(literal.as_bytes()) {
             input.position += literal.len();
@@ -36,7 +36,7 @@ pub fn suggest_literal<'a>(literal: &'static str) -> impl FnParser<'a, &'static 
     }
 }
 
-pub fn char<'a>(expected_char: char) -> impl FnParser<'a, char> {
+pub fn char<'a>(expected_char: char) -> impl FnParser<'a, Output = char> {
     move |input: &mut Stream<'a>| {
         if let Some(&char) = input.bytes.get(input.position) {
             if expected_char.is_ascii() {
@@ -81,6 +81,6 @@ pub fn end_of_file(input: &mut Stream) -> Option<()> {
     }
 }
 
-pub fn fail<'a, T>(message: &'static str) -> impl FnParser<'a, T> {
+pub fn fail<'a, T>(message: &'static str) -> impl FnParser<'a, Output = T> {
     move |input: &mut Stream<'a>| input.fail_message(message)
 }

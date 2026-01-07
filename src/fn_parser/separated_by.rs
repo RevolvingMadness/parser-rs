@@ -4,9 +4,9 @@ pub trait FnParserSeparatedBy<'a, T, C>
 where
     Self: Sized,
 {
-    fn separated_by<S, U>(mut self, mut separator: S) -> impl FnParser<'a, C>
+    fn separated_by<S, U>(mut self, mut separator: S) -> impl FnParser<'a>
     where
-        S: FnParser<'a, U>,
+        S: FnParser<'a>,
         C: Default + Accumulate<T>,
     {
         move |input: &mut Stream<'a>| {
@@ -74,9 +74,9 @@ where
         }
     }
 
-    fn separated_by_trailing<S, U>(mut self, mut separator: S) -> impl FnParser<'a, C>
+    fn separated_by_trailing<S>(mut self, mut separator: S) -> impl FnParser<'a>
     where
-        S: FnParser<'a, U>,
+        S: FnParser<'a>,
         C: Default + Accumulate<T>,
     {
         move |input: &mut Stream<'a>| {
@@ -149,9 +149,9 @@ where
         }
     }
 
-    fn separated_by_one<S, U>(mut self, mut separator: S) -> impl FnParser<'a, C>
+    fn separated_by_one<S, U>(mut self, mut separator: S) -> impl FnParser<'a>
     where
-        S: FnParser<'a, U>,
+        S: FnParser<'a>,
         C: Default + Accumulate<T>,
     {
         move |input: &mut Stream<'a>| {
@@ -206,9 +206,9 @@ where
         min: usize,
         max: usize,
         mut separator: S,
-    ) -> impl FnParser<'a, C>
+    ) -> impl FnParser<'a>
     where
-        S: FnParser<'a, U>,
+        S: FnParser<'a>,
         C: Default + Accumulate<T>,
     {
         move |input: &mut Stream<'a>| {

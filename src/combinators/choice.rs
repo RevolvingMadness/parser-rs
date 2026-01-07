@@ -5,10 +5,12 @@ use crate::{
 
 macro_rules! impl_choice_tuple {
     ($($idx:tt : $name:ident),*) => {
-        impl<'a, T, $($name),*> FnParser<'a, T> for ($($name,)*)
+        impl<'a, T, $($name),*> FnParser<'a> for ($($name,)*)
         where
-            $($name: FnParser<'a, T>),*
+            $($name: FnParser<'a, Output = T>),*
         {
+            type Output = T;
+
             fn parse(&mut self, input: &mut Stream<'a>) -> Option<T> {
                 let start_checkpoint = input.checkpoint();
 
@@ -122,9 +124,9 @@ impl_choice_tuple!(0: P0, 1: P1, 2: P2, 3: P3, 4: P4, 5: P5, 6: P6, 7: P7, 8: P8
 
 #[inline(always)]
 #[must_use]
-pub fn choice<'a, T, P>(parser: P) -> impl FnParser<'a, T>
+pub fn choice<'a, T, P>(parser: P) -> impl FnParser<'a, Output = T>
 where
-    P: FnParser<'a, T>,
+    P: FnParser<'a, Output = T>,
 {
     parser
 }
