@@ -12,9 +12,9 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     group.bench_function("parser-rs-v2", |b| {
         b.iter(|| {
-            let mut stream = Stream::new(&input, None, None);
+            let stream = Stream::new(&input);
 
-            black_box(literal("literal").many::<()>().parse(&mut stream))
+            black_box(literal("literal").many::<()>().parse_fully(stream))
         })
     });
 

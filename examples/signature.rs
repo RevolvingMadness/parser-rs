@@ -51,7 +51,9 @@ mod signature_tests {
         #[test]
         fn test_two_signatures_active_param_0() {
             let text = "command ";
-            let mut input = Stream::new(text, Some(8), Some(10));
+            let mut input = Stream::new(text);
+            input.cursor = Some(8);
+            input.config.max_validation_errors = 10;
             input.signature_help_enabled = true;
 
             let _ = parser(&mut input);
@@ -78,7 +80,9 @@ mod signature_tests {
         #[test]
         fn test_two_signatures_no_active_param() {
             let text = "command ";
-            let mut input = Stream::new(text, Some(7), Some(10));
+            let mut input = Stream::new(text);
+            input.cursor = Some(7);
+            input.config.max_validation_errors = 10;
             input.signature_help_enabled = true;
 
             let _ = parser(&mut input);
@@ -105,7 +109,9 @@ mod signature_tests {
         #[test]
         fn test_two_signatures_no_active_param_2() {
             let text = "command  ";
-            let mut input = Stream::new(text, Some(9), Some(10));
+            let mut input = Stream::new(text);
+            input.cursor = Some(9);
+            input.config.max_validation_errors = 10;
             input.signature_help_enabled = true;
 
             let _ = parser(&mut input);
@@ -116,7 +122,9 @@ mod signature_tests {
         #[test]
         fn test_1param_signature() {
             let text = "command 1param";
-            let mut input = Stream::new(text, Some(8), Some(10));
+            let mut input = Stream::new(text);
+            input.cursor = Some(8);
+            input.config.max_validation_errors = 10;
             input.signature_help_enabled = true;
 
             let _ = parser(&mut input);
@@ -135,7 +143,9 @@ mod signature_tests {
         #[test]
         fn test_1param_signature_2() {
             let text = "command 1param param#command param1 param";
-            let mut input = Stream::new(text, Some(18), Some(10));
+            let mut input = Stream::new(text);
+            input.cursor = Some(18);
+            input.config.max_validation_errors = 10;
             input.signature_help_enabled = true;
 
             let _ = (|input: &mut Stream| {
@@ -161,7 +171,9 @@ mod signature_tests {
         #[test]
         fn test_2param_signature() {
             let text = "command 2param";
-            let mut input = Stream::new(text, Some(8), Some(10));
+            let mut input = Stream::new(text);
+            input.cursor = Some(8);
+            input.config.max_validation_errors = 10;
             input.signature_help_enabled = true;
 
             let _ = parser(&mut input);
@@ -180,7 +192,9 @@ mod signature_tests {
         #[test]
         fn test_signature() {
             let text = "command 1param param";
-            let mut input = Stream::new(text, Some(20), Some(10));
+            let mut input = Stream::new(text);
+            input.cursor = Some(20);
+            input.config.max_validation_errors = 10;
             input.signature_help_enabled = true;
 
             let _ = parser(&mut input);
@@ -199,7 +213,9 @@ mod signature_tests {
         #[test]
         fn test_signature_2() {
             let text = "";
-            let mut input = Stream::new(text, Some(0), Some(10));
+            let mut input = Stream::new(text);
+            input.cursor = Some(0);
+            input.config.max_validation_errors = 10;
             input.signature_help_enabled = true;
 
             let _ = parser.parse(&mut input);
@@ -226,7 +242,9 @@ mod signature_tests {
         #[test]
         fn test_no_signature() {
             let text = "";
-            let mut input = Stream::new(text, Some(0), Some(10));
+            let mut input = Stream::new(text);
+            input.cursor = Some(0);
+            input.config.max_validation_errors = 10;
             input.signature_help_enabled = true;
 
             let _ = parser.separated_by::<_, _, ()>(char('/')).parse(&mut input);
@@ -284,7 +302,9 @@ mod signature_tests {
         #[test]
         fn test_active_param_0() {
             let text = "command ";
-            let mut input = Stream::new(text, Some(8), Some(10));
+            let mut input = Stream::new(text);
+            input.cursor = Some(8);
+            input.config.max_validation_errors = 10;
             input.signature_help_enabled = true;
 
             let _ = complex_parser(&mut input);
@@ -311,7 +331,9 @@ mod signature_tests {
         #[test]
         fn test_nested_active_param_0() {
             let text = "command mode2 ";
-            let mut input = Stream::new(text, Some(14), Some(10));
+            let mut input = Stream::new(text);
+            input.cursor = Some(14);
+            input.config.max_validation_errors = 10;
             input.signature_help_enabled = true;
 
             let _ = complex_parser(&mut input);
@@ -330,7 +352,9 @@ mod signature_tests {
         #[test]
         fn test_nested_active_param_1() {
             let text = "command mode2 mode2value param2";
-            let mut input = Stream::new(text, Some(28), Some(10));
+            let mut input = Stream::new(text);
+            input.cursor = Some(28);
+            input.config.max_validation_errors = 10;
             input.signature_help_enabled = true;
 
             let _ = complex_parser(&mut input);
@@ -349,7 +373,9 @@ mod signature_tests {
         #[test]
         fn test_active_param_1() {
             let text = "command mode1 ";
-            let mut input = Stream::new(text, Some(14), Some(10));
+            let mut input = Stream::new(text);
+            input.cursor = Some(14);
+            input.config.max_validation_errors = 10;
             input.signature_help_enabled = true;
 
             let _ = complex_parser(&mut input);
@@ -435,7 +461,9 @@ mod signature_tests {
         #[test]
         fn test_signature_whitespace() {
             let text = "command  param";
-            let mut input = Stream::new(text, Some(8), Some(10));
+            let mut input = Stream::new(text);
+            input.cursor = Some(8);
+            input.config.max_validation_errors = 10;
             input.signature_help_enabled = true;
 
             let _ = parser(&mut input);
@@ -454,7 +482,9 @@ mod signature_tests {
         #[test]
         fn test_signature_whitespace_2() {
             let text = "command  ";
-            let mut input = Stream::new(text, Some(8), Some(10));
+            let mut input = Stream::new(text);
+            input.cursor = Some(8);
+            input.config.max_validation_errors = 10;
             input.signature_help_enabled = true;
 
             let _ = parser(&mut input);
@@ -473,7 +503,9 @@ mod signature_tests {
         #[test]
         fn test_signature_whitespace_3() {
             let text = "command  ";
-            let mut input = Stream::new(text, Some(7), Some(10));
+            let mut input = Stream::new(text);
+            input.cursor = Some(7);
+            input.config.max_validation_errors = 10;
             input.signature_help_enabled = true;
 
             let _ = parser(&mut input);

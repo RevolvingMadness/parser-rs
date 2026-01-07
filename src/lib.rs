@@ -111,11 +111,18 @@ pub enum Expectation {
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct ParseError {
+pub struct MaxParseError {
     pub span: ParserRange,
     pub messages: Vec<&'static str>,
     pub expected: Vec<Expectation>,
     pub semantic_tokens: Vec<SemanticToken>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ParseError {
+    pub span: ParserRange,
+    pub messages: Vec<&'static str>,
+    pub expected: Vec<Expectation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -173,8 +180,26 @@ pub struct Checkpoint {
 pub struct StreamConfig {
     pub semantic_tokens: bool,
     pub max_validation_errors: usize,
-    pub validation_errors: bool,
     pub signatures: bool,
+}
+
+#[derive(Debug)]
+pub struct ParseResult<T> {
+    pub result: Result<T, ParseError>,
+    pub suggestions: Vec<Suggestion>,
+    pub validation_errors: Vec<ValidationError>,
+    pub semantic_tokens: Vec<SemanticToken>,
+    pub signatures: Vec<Signature>,
+}
+
+impl<T> ParseResult<T> {
+    pub fn succeeded(&self) -> bool {
+        self.result.is_ok()
+    }
+
+    pub fn failed(&self) -> bool {
+        self.result.is_err()
+    }
 }
 
 #[derive(Debug)]
@@ -183,7 +208,7 @@ pub struct Stream<'a> {
     pub bytes: &'a [u8],
     pub position: usize,
     pub cursor: Option<usize>,
-    pub max_error: ParseError,
+    pub max_error: MaxParseError,
     pub suggestions: Vec<Suggestion>,
     pub validation_errors: Vec<ValidationError>,
     pub can_suggest_at_position: bool,
@@ -197,17 +222,13 @@ pub struct Stream<'a> {
 }
 
 impl<'a> Stream<'a> {
-    pub fn new(
-        input: &'a str,
-        completion_target: Option<usize>,
-        max_validation_errors: Option<usize>,
-    ) -> Self {
+    pub fn new(input: &'a str) -> Self {
         Self {
             input,
             bytes: input.as_bytes(),
             position: 0,
-            cursor: completion_target,
-            max_error: ParseError::default(),
+            cursor: None,
+            max_error: MaxParseError::default(),
             suggestions: Vec::new(),
             validation_errors: Vec::new(),
             can_suggest_at_position: true,
@@ -517,7 +538,7 @@ impl<'a> Stream<'a> {
         span: R,
         message: M,
     ) {
-        if self.config.validation_errors
+        if self.config.max_validation_errors != 0
             && self.validation_errors.len() < self.config.max_validation_errors
         {
             self.validation_errors.push(ValidationError {
@@ -534,7 +555,7 @@ impl<'a> Stream<'a> {
         R: Into<ParserRange>,
         M: ToString,
     {
-        if self.config.validation_errors
+        if self.config.max_validation_errors != 0
             && self.validation_errors.len() < self.config.max_validation_errors
         {
             self.validation_errors.push(ValidationError {
@@ -1391,12 +1412,33 @@ where
 
     fn parse(&mut self, input: &mut Stream<'a>) -> Option<T>;
 
-    fn parse_with_eof(&mut self, input: &mut Stream<'a>) -> Option<T> {
-        let result = self.parse(input)?;
+    fn parse_fully(&mut self, mut input: Stream<'a>) -> ParseResult<T> {
+        let result = (|input: &mut Stream<'a>| {
+            let result = self.parse(input)?;
 
-        end_of_file(input)?;
+            end_of_file(input)?;
 
-        Some(result)
+            Some(result)
+        })
+        .parse(&mut input);
+
+        let semantic_tokens = if result.is_none() {
+            input.max_error.semantic_tokens
+        } else {
+            input.semantic_tokens
+        };
+
+        ParseResult {
+            result: result.ok_or(ParseError {
+                span: input.max_error.span,
+                messages: input.max_error.messages,
+                expected: input.max_error.expected,
+            }),
+            suggestions: input.suggestions,
+            validation_errors: input.validation_errors,
+            semantic_tokens,
+            signatures: input.signatures,
+        }
     }
 }
 
@@ -2071,7 +2113,7 @@ mod tests {
     mod semantic_token_tests {
         use super::*;
 
-        pub fn parser_1(input: &mut Stream) -> Option<()> {
+        pub fn parser_1(input: Stream) -> ParseResult<()> {
             choice((
                 |input: &mut Stream| {
                     suggest_literal("first")
@@ -2085,19 +2127,18 @@ mod tests {
                     .map_to(())
                     .syntax(SemanticTokenKind::Variable),
             ))
-            .parse_with_eof(input)
+            .parse_fully(input)
         }
 
         #[test]
         pub fn test_semantic_variable() {
-            let input = "first";
-            let mut input = Stream::new(input, Some(input.len()), None);
+            let mut input = Stream::new("first");
             input.config.semantic_tokens = true;
 
-            let result = parser_1(&mut input);
-            assert!(result.is_some());
+            let result = parser_1(input);
+            assert!(result.succeeded());
             assert_eq!(
-                input.semantic_tokens,
+                result.semantic_tokens,
                 vec![SemanticToken {
                     range: (0..5).into(),
                     kind: SemanticTokenKind::Variable,
@@ -2107,14 +2148,13 @@ mod tests {
 
         #[test]
         pub fn test_semantic_function() {
-            let input = "firstsecond";
-            let mut input = Stream::new(input, Some(input.len()), None);
+            let mut input = Stream::new("firstsecond");
             input.config.semantic_tokens = true;
 
-            let result = parser_1(&mut input);
-            assert!(result.is_some());
+            let result = parser_1(input);
+            assert!(result.succeeded());
             assert_eq!(
-                input.semantic_tokens,
+                result.semantic_tokens,
                 vec![SemanticToken {
                     range: (0..5).into(),
                     kind: SemanticTokenKind::Function,
@@ -2127,7 +2167,7 @@ mod tests {
     mod choice_suggestion_tests {
         use super::*;
 
-        pub fn suggestion_parser_1(input: &mut Stream) -> Option<()> {
+        pub fn suggestion_parser_1(input: Stream) -> ParseResult<()> {
             choice((
                 |input: &mut Stream| {
                     suggest_literal("first").parse(input)?;
@@ -2136,18 +2176,20 @@ mod tests {
                 suggest_literal("first"),
             ))
             .map_to(())
-            .parse_with_eof(input)
+            .parse_fully(input)
         }
 
         #[test]
         pub fn test_suggest_second() {
             let input = "first";
-            let mut input = Stream::new(input, Some(input.len()), None);
+            let input_len = input.len();
+            let mut input = Stream::new(input);
+            input.cursor = Some(input_len);
 
-            let result = suggestion_parser_1(&mut input);
-            assert!(result.is_some());
+            let result = suggestion_parser_1(input);
+            assert!(result.succeeded());
             assert_eq!(
-                input.suggestions,
+                result.suggestions,
                 vec![Suggestion {
                     range: (5..11).into(),
                     expected: Expectation::Literal("second")
@@ -2155,37 +2197,36 @@ mod tests {
             );
         }
 
-        pub fn suggestion_parser_2(input: &mut Stream) -> Option<()> {
+        pub fn suggestion_parser_2(input: Stream) -> ParseResult<()> {
             choice((suggest_literal("a"), suggest_literal("b")))
                 .separated_by::<_, _, ()>(suggest_literal("i"))
-                .parse_with_eof(input)
+                .parse_fully(input)
         }
 
         #[test]
         pub fn test_no_suggestions() {
-            let input = "a";
-            let mut input = Stream::new(input, Some(0), None);
+            let input = Stream::new("a");
 
-            let result = suggestion_parser_2(&mut input);
-            assert!(result.is_some());
-            assert_eq!(input.suggestions, vec![]);
+            let result = suggestion_parser_2(input);
+            assert!(result.succeeded());
+            assert_eq!(result.suggestions, vec![]);
         }
 
-        pub fn suggestion_parser_3(input: &mut Stream) -> Option<()> {
+        pub fn suggestion_parser_3(input: Stream) -> ParseResult<()> {
             choice((suggest_literal("a"), suggest_literal("b")))
                 .map_to(())
-                .parse_with_eof(input)
+                .parse_fully(input)
         }
 
         #[test]
         pub fn test_suggest_a_and_b() {
-            let input = "";
-            let mut input = Stream::new(input, Some(0), None);
+            let mut input = Stream::new("");
+            input.cursor = Some(0);
 
-            let result = suggestion_parser_3(&mut input);
-            assert!(result.is_none());
+            let result = suggestion_parser_3(input);
+            assert!(result.failed());
             assert_eq!(
-                input.suggestions,
+                result.suggestions,
                 vec![
                     Suggestion {
                         range: (0..1).into(),
@@ -2204,8 +2245,8 @@ mod tests {
     mod whitespace_tests {
         use super::*;
 
-        fn parser_no_whitespace<'a>(input: &mut Stream<'a>) -> Option<&'a str> {
-            let r = choice((
+        fn parser_no_whitespace<'a>(input: Stream<'a>) -> ParseResult<&'a str> {
+            choice((
                 literal("command1").syntax(SemanticTokenKind::Variable),
                 |input: &mut Stream| {
                     literal("command1")
@@ -2215,21 +2256,18 @@ mod tests {
                     literal("argument").parse(input)
                 },
             ))
-            .parse_with_eof(input)?;
-
-            Some(r)
+            .parse_fully(input)
         }
 
         #[test]
         pub fn test_no_ws_variable() {
-            let input = "command1";
-            let mut input = Stream::new(input, Some(0), None);
+            let mut input = Stream::new("command1");
             input.config.semantic_tokens = true;
 
-            let result = parser_no_whitespace.parse_with_eof(&mut input);
-            assert!(result.is_some());
+            let result = parser_no_whitespace(input);
+            assert!(result.succeeded());
             assert_eq!(
-                input.semantic_tokens,
+                result.semantic_tokens,
                 vec![SemanticToken {
                     range: (0..8).into(),
                     kind: SemanticTokenKind::Variable
@@ -2239,14 +2277,13 @@ mod tests {
 
         #[test]
         pub fn test_no_ws_keyword() {
-            let input = "command1 ";
-            let mut input = Stream::new(input, Some(0), None);
+            let mut input = Stream::new("command1 ");
             input.config.semantic_tokens = true;
 
-            let result = parser_no_whitespace.parse_with_eof(&mut input);
-            assert!(result.is_none());
+            let result = parser_no_whitespace(input);
+            assert!(result.failed());
             assert_eq!(
-                input.max_error.semantic_tokens,
+                result.semantic_tokens,
                 vec![SemanticToken {
                     range: (0..8).into(),
                     kind: SemanticTokenKind::Function
@@ -2254,7 +2291,7 @@ mod tests {
             )
         }
 
-        fn parser_whitespace<'a>(input: &mut Stream<'a>) -> Option<&'a str> {
+        fn parser_whitespace<'a>(input: Stream<'a>) -> ParseResult<&'a str> {
             (|input: &mut Stream| {
                 let r = choice((
                     literal("command1").syntax(SemanticTokenKind::Variable),
@@ -2272,19 +2309,18 @@ mod tests {
 
                 Some(r)
             })
-            .parse_with_eof(input)
+            .parse_fully(input)
         }
 
         #[test]
         pub fn test_ws_variable_1() {
-            let input = "command1";
-            let mut input = Stream::new(input, Some(0), None);
+            let mut input = Stream::new("command1");
             input.config.semantic_tokens = true;
 
-            let result = parser_whitespace.parse_with_eof(&mut input);
-            assert!(result.is_some());
+            let result = parser_whitespace(input);
+            assert!(result.succeeded());
             assert_eq!(
-                input.semantic_tokens,
+                result.semantic_tokens,
                 vec![SemanticToken {
                     range: (0..8).into(),
                     kind: SemanticTokenKind::Variable
@@ -2294,14 +2330,13 @@ mod tests {
 
         #[test]
         pub fn test_ws_variable_2() {
-            let input = "command1 ";
-            let mut input = Stream::new(input, Some(0), None);
+            let mut input = Stream::new("command1 ");
             input.config.semantic_tokens = true;
 
-            let result = parser_whitespace.parse_with_eof(&mut input);
-            assert!(result.is_some());
+            let result = parser_whitespace(input);
+            assert!(result.succeeded());
             assert_eq!(
-                input.semantic_tokens,
+                result.semantic_tokens,
                 vec![SemanticToken {
                     range: (0..8).into(),
                     kind: SemanticTokenKind::Variable
@@ -2311,14 +2346,13 @@ mod tests {
 
         #[test]
         pub fn test_ws_function_1() {
-            let input = "command1 argument";
-            let mut input = Stream::new(input, Some(0), None);
+            let mut input = Stream::new("command1 argument");
             input.config.semantic_tokens = true;
 
-            let result = parser_whitespace.parse_with_eof(&mut input);
-            assert!(result.is_some());
+            let result = parser_whitespace(input);
+            assert!(result.succeeded());
             assert_eq!(
-                input.semantic_tokens,
+                result.semantic_tokens,
                 vec![SemanticToken {
                     range: (0..8).into(),
                     kind: SemanticTokenKind::Function
@@ -2330,25 +2364,25 @@ mod tests {
     mod literal_tests {
         use super::*;
 
-        fn parser<'a>(input: &mut Stream<'a>) -> Option<&'a str> {
-            suggest_literal("literal").parse_with_eof(input)
+        fn parser<'a>(input: Stream<'a>) -> ParseResult<&'a str> {
+            suggest_literal("literal").parse_fully(input)
         }
 
         #[test]
         fn test_full_fail() {
-            let input = "";
-            let mut input = Stream::new(input, Some(0), None);
+            let mut input = Stream::new("");
+            input.cursor = Some(0);
 
-            let result = parser(&mut input);
+            let result = parser(input);
 
-            assert!(result.is_none());
-            assert_eq!(input.max_error.span, (0..1).into());
+            assert!(result.failed());
+
+            let error = result.result.unwrap_err();
+
+            assert_eq!(error.span, (0..1).into());
+            assert_eq!(error.expected, vec![Expectation::Literal("literal")]);
             assert_eq!(
-                input.max_error.expected,
-                vec![Expectation::Literal("literal")]
-            );
-            assert_eq!(
-                input.suggestions,
+                result.suggestions,
                 vec![Suggestion {
                     range: (0..7).into(),
                     expected: Expectation::Literal("literal")
@@ -2358,19 +2392,19 @@ mod tests {
 
         #[test]
         fn test_partial_fail() {
-            let input = "lit";
-            let mut input = Stream::new(input, Some(3), None);
+            let mut input = Stream::new("lit");
+            input.cursor = Some(3);
 
-            let result = parser(&mut input);
+            let result = parser(input);
 
-            assert!(result.is_none());
-            assert_eq!(input.max_error.span, (0..1).into());
+            assert!(result.failed());
+
+            let error = result.result.unwrap_err();
+
+            assert_eq!(error.span, (0..1).into());
+            assert_eq!(error.expected, vec![Expectation::Literal("literal")]);
             assert_eq!(
-                input.max_error.expected,
-                vec![Expectation::Literal("literal")]
-            );
-            assert_eq!(
-                input.suggestions,
+                result.suggestions,
                 vec![Suggestion {
                     range: (0..7).into(),
                     expected: Expectation::Literal("literal")
@@ -2380,58 +2414,60 @@ mod tests {
 
         #[test]
         fn test_succeed() {
-            let input = "literal";
-            let mut input = Stream::new(input, Some(0), None);
+            let input = Stream::new("literal");
 
-            let result = parser(&mut input);
+            let result = parser(input);
 
-            assert!(result.is_some());
-            assert!(input.suggestions.is_empty());
+            assert!(result.succeeded());
+            assert!(result.suggestions.is_empty());
         }
 
-        fn complex_parser<'a>(input: &mut Stream<'a>) -> Option<Option<&'a str>> {
-            suggest_literal("literal").optional().parse_with_eof(input)
+        fn complex_parser<'a>(input: Stream<'a>) -> ParseResult<Option<&'a str>> {
+            suggest_literal("literal").optional().parse_fully(input)
         }
 
         #[test]
         fn test_suggest_literal() {
-            let input = "";
-            let mut input = Stream::new(input, Some(0), None);
+            let mut input = Stream::new("");
+            input.cursor = Some(0);
 
-            let result = complex_parser(&mut input);
+            let result = complex_parser(input);
 
-            assert!(result.is_some());
-            assert_eq!(input.suggestions.len(), 1);
+            assert!(result.succeeded());
+            assert_eq!(result.suggestions.len(), 1);
         }
     }
 
     mod choice_tests {
         use super::*;
 
-        fn parser<'a>(input: &mut Stream<'a>) -> Option<&'a str> {
-            choice((suggest_literal("a"), suggest_literal("b"))).parse_with_eof(input)
+        fn parser<'a>(input: Stream<'a>) -> ParseResult<&'a str> {
+            choice((suggest_literal("a"), suggest_literal("b"))).parse_fully(input)
         }
 
         #[test]
         fn test_suggest_a_and_b() {
-            let input = "";
-            let mut input = Stream::new(input, Some(0), None);
+            let mut input = Stream::new("");
+            input.cursor = Some(0);
 
-            let result = parser(&mut input);
+            let result = parser(input);
 
-            assert!(result.is_none());
-            assert_eq!(input.max_error.span, (0..1).into());
+            assert!(result.failed());
+
+            let error = result.result.unwrap_err();
+
+            assert_eq!(error.span, (0..1).into());
             assert_eq!(
-                input.max_error.expected,
+                error.expected,
                 vec![Expectation::Literal("a"), Expectation::Literal("b")]
             );
 
-            assert_eq!(input.suggestions.len(), 2);
-            assert!(input.suggestions.contains(&Suggestion {
+            assert_eq!(result.suggestions.len(), 2);
+            assert!(result.suggestions.contains(&Suggestion {
                 range: (0..1).into(),
                 expected: Expectation::Literal("a")
             }));
-            assert!(input.suggestions.contains(&Suggestion {
+            assert!(result.suggestions.contains(&Suggestion {
                 range: (0..1).into(),
                 expected: Expectation::Literal("b")
             }));
@@ -2439,24 +2475,22 @@ mod tests {
 
         #[test]
         fn test_suggest_nothing() {
-            let input = "a";
-            let mut input = Stream::new(input, Some(0), None);
+            let input = Stream::new("a");
 
-            let result = parser(&mut input);
+            let result = parser(input);
 
-            assert!(result.is_some());
-            assert_eq!(input.suggestions, vec![]);
+            assert!(result.succeeded());
+            assert_eq!(result.suggestions, vec![]);
 
-            let input = "b";
-            let mut input = Stream::new(input, Some(0), None);
+            let input = Stream::new("b");
 
-            let result = parser(&mut input);
+            let result = parser(input);
 
-            assert!(result.is_some());
-            assert_eq!(input.suggestions, vec![]);
+            assert!(result.succeeded());
+            assert_eq!(result.suggestions, vec![]);
         }
 
-        fn complex_parser_1<'a>(input: &mut Stream<'a>) -> Option<&'a str> {
+        fn complex_parser_1<'a>(input: Stream<'a>) -> ParseResult<&'a str> {
             choice((
                 |input: &mut Stream| {
                     suggest_literal("first").parse(input)?;
@@ -2466,19 +2500,19 @@ mod tests {
                 },
                 suggest_literal("first"),
             ))
-            .parse_with_eof(input)
+            .parse_fully(input)
         }
 
         #[test]
         fn suggest_second_1() {
-            let input = "first";
-            let mut input = Stream::new(input, Some(5), None);
+            let mut input = Stream::new("first");
+            input.cursor = Some(5);
 
-            let result = complex_parser_1(&mut input);
+            let result = complex_parser_1(input);
 
-            assert!(result.is_some());
+            assert!(result.succeeded());
             assert_eq!(
-                input.suggestions,
+                result.suggestions,
                 vec![Suggestion {
                     range: (5..11).into(),
                     expected: Expectation::Literal("second")
@@ -2486,7 +2520,7 @@ mod tests {
             );
         }
 
-        fn complex_parser_2<'a>(input: &mut Stream<'a>) -> Option<&'a str> {
+        fn complex_parser_2<'a>(input: Stream<'a>) -> ParseResult<&'a str> {
             choice((
                 |input: &mut Stream| {
                     suggest_literal("first").parse(input)?;
@@ -2496,19 +2530,19 @@ mod tests {
                 },
                 suggest_literal("first"),
             ))
-            .parse_with_eof(input)
+            .parse_fully(input)
         }
 
         #[test]
         fn suggest_second_2() {
-            let input = "first";
-            let mut input = Stream::new(input, Some(5), None);
+            let mut input = Stream::new("first");
+            input.cursor = Some(5);
 
-            let result = complex_parser_2(&mut input);
+            let result = complex_parser_2(input);
 
-            assert!(result.is_some());
+            assert!(result.succeeded());
             assert_eq!(
-                input.suggestions,
+                result.suggestions,
                 vec![Suggestion {
                     range: (5..11).into(),
                     expected: Expectation::Literal("second")
@@ -2520,7 +2554,7 @@ mod tests {
     mod semantic_choice_tests {
         use super::*;
 
-        fn complex_parser_1<'a>(input: &mut Stream<'a>) -> Option<&'a str> {
+        fn complex_parser_1<'a>(input: Stream<'a>) -> ParseResult<&'a str> {
             choice((
                 |input: &mut Stream| {
                     suggest_literal("first")
@@ -2532,20 +2566,19 @@ mod tests {
                 },
                 suggest_literal("first").syntax(SemanticTokenKind::Variable),
             ))
-            .parse_with_eof(input)
+            .parse_fully(input)
         }
 
         #[test]
         fn semantic_variable() {
-            let input = "first";
-            let mut input = Stream::new(input, None, None);
+            let mut input = Stream::new("first");
             input.config.semantic_tokens = true;
 
-            let result = complex_parser_1(&mut input);
+            let result = complex_parser_1(input);
 
-            assert!(result.is_some());
+            assert!(result.succeeded());
             assert_eq!(
-                input.semantic_tokens,
+                result.semantic_tokens,
                 vec![SemanticToken {
                     range: (0..5).into(),
                     kind: SemanticTokenKind::Variable
@@ -2555,15 +2588,14 @@ mod tests {
 
         #[test]
         fn semantic_function() {
-            let input = "firstsecond";
-            let mut input = Stream::new(input, None, None);
+            let mut input = Stream::new("firstsecond");
             input.config.semantic_tokens = true;
 
-            let result = complex_parser_1(&mut input);
+            let result = complex_parser_1(input);
 
-            assert!(result.is_some());
+            assert!(result.succeeded());
             assert_eq!(
-                input.semantic_tokens,
+                result.semantic_tokens,
                 vec![SemanticToken {
                     range: (0..5).into(),
                     kind: SemanticTokenKind::Function
@@ -2571,7 +2603,7 @@ mod tests {
             );
         }
 
-        fn complex_parser_2<'a>(input: &mut Stream<'a>) -> Option<&'a str> {
+        fn complex_parser_2<'a>(input: Stream<'a>) -> ParseResult<&'a str> {
             choice((
                 |input: &mut Stream| {
                     suggest_literal("first")
@@ -2584,20 +2616,19 @@ mod tests {
                 },
                 suggest_literal("first").syntax(SemanticTokenKind::Variable),
             ))
-            .parse_with_eof(input)
+            .parse_fully(input)
         }
 
         #[test]
         fn semantic_function_2() {
-            let input = "firstsecond";
-            let mut input = Stream::new(input, None, None);
+            let mut input = Stream::new("firstsecond");
             input.config.semantic_tokens = true;
 
-            let result = complex_parser_2(&mut input);
+            let result = complex_parser_2(input);
 
-            assert!(result.is_none());
+            assert!(result.failed());
             assert_eq!(
-                input.max_error.semantic_tokens,
+                result.semantic_tokens,
                 vec![SemanticToken {
                     range: (0..5).into(),
                     kind: SemanticTokenKind::Function
@@ -2607,15 +2638,14 @@ mod tests {
 
         #[test]
         fn semantic_variable_2() {
-            let input = "first";
-            let mut input: Stream<'_> = Stream::new(input, None, None);
+            let mut input: Stream<'_> = Stream::new("first");
             input.config.semantic_tokens = true;
 
-            let result = complex_parser_2(&mut input);
+            let result = complex_parser_2(input);
 
-            assert!(result.is_some());
+            assert!(result.succeeded());
             assert_eq!(
-                input.semantic_tokens,
+                result.semantic_tokens,
                 vec![SemanticToken {
                     range: (0..5).into(),
                     kind: SemanticTokenKind::Variable

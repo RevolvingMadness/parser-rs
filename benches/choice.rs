@@ -2,10 +2,10 @@ use chumsky::error::Rich;
 use chumsky::primitive::{choice as chumsky_choice, just};
 use chumsky::{Parser, extra};
 use criterion::{Criterion, criterion_group, criterion_main};
-use parser_rs::{FnParser, Stream, char, choice as parser_rs_choice};
+use parser_rs::{FnParser, ParseResult, Stream, char, choice as parser_rs_choice};
 use std::hint::black_box;
 
-fn parser_rs_parser(input: &mut Stream) -> Option<()> {
+fn parser_rs_parser(input: Stream) -> ParseResult<()> {
     parser_rs_choice((
         char('a'),
         char('b'),
@@ -35,7 +35,7 @@ fn parser_rs_parser(input: &mut Stream) -> Option<()> {
         char('z'),
     ))
     .many::<()>()
-    .parse(input)
+    .parse_fully(input)
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
@@ -45,9 +45,9 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     group.bench_function("parser-rs-v2", |b| {
         b.iter(|| {
-            let mut stream = Stream::new(&input, None, None);
+            let stream = Stream::new(&input);
 
-            black_box(parser_rs_parser(&mut stream));
+            black_box(parser_rs_parser(stream));
         })
     });
 

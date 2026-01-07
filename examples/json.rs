@@ -181,7 +181,7 @@ fn main() {
         "address": "override"
     }
     "#;
-    let mut stream_valid = Stream::new(input_valid, None, Some(10));
+    let mut stream_valid = Stream::new(input_valid);
     let result = parse_json(&mut stream_valid);
 
     println!("Input '{}'", input_valid);
@@ -194,7 +194,7 @@ fn main() {
     println!("\n\n");
 
     let input_invalid = r#" { "key": tru } "#;
-    let mut stream_invalid = Stream::new(input_invalid, None, Some(10));
+    let mut stream_invalid = Stream::new(input_invalid);
     let result = parse_json(&mut stream_invalid);
 
     println!("Input '{}'", input_valid,);
@@ -208,7 +208,10 @@ fn main() {
 
     let input_completion = r#" { "key": tru "#;
     let cursor_position = 10;
-    let mut stream_completion = Stream::new(input_completion, Some(cursor_position), Some(10));
+    let mut stream_completion = Stream::new(input_completion);
+    stream_completion.cursor = Some(cursor_position);
+    stream_completion.config.max_validation_errors = 10;
+
     let _ = parse_json(&mut stream_completion);
 
     println!(
