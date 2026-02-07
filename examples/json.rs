@@ -117,7 +117,9 @@ fn parse_number<'a>(input: &mut Stream<'a>) -> Option<JsonValue> {
 }
 
 fn parse_array(input: &mut Stream) -> Option<JsonValue> {
-    let items_parser = parse_value.separated_by_trailing(padded(char(',')));
+    let items_parser = parse_value
+        .separated_by_trailing(padded(char(',')))
+        .map(|(result, _)| result);
 
     char('[').parse(input)?;
     let items = padded(items_parser).parse(input)?;
@@ -138,7 +140,9 @@ fn parse_object<'a>(input: &mut Stream<'a>) -> Option<JsonValue> {
         Some(((key_span, key), value))
     };
 
-    let items_parser = kv_pair_parser.separated_by_trailing(padded(char(',')));
+    let items_parser = kv_pair_parser
+        .separated_by_trailing(padded(char(',')))
+        .map(|(result, _)| result);
 
     char('{').parse(input)?;
     let items: Vec<((ParserRange, String), JsonValue)> = padded(items_parser).parse(input)?;

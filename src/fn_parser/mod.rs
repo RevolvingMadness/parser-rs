@@ -503,7 +503,7 @@ where
     fn separated_by_trailing<Separator, AccumulatedOutput>(
         mut self,
         mut separator: Separator,
-    ) -> impl FnParser<'a, Output = AccumulatedOutput>
+    ) -> impl FnParser<'a, Output = (AccumulatedOutput, bool)>
     where
         Separator: FnParser<'a>,
         AccumulatedOutput: Default + Accumulate<Self::Output>,
@@ -528,7 +528,7 @@ where
                     input.full_rollback(start_checkpoint);
                     input.suggestions.extend(preserved_suggestions);
 
-                    return Some(AccumulatedOutput::default());
+                    return Some((AccumulatedOutput::default(), false));
                 }
             };
 
@@ -536,8 +536,10 @@ where
             collection.accumulate(first);
 
             if input.position == start_checkpoint.position {
-                return Some(collection);
+                return Some((collection, false));
             }
+
+            let mut has_trailing_item = false;
 
             loop {
                 let before_separator = input.checkpoint();
@@ -564,6 +566,7 @@ where
                                 }
 
                                 input.full_rollback(before_item);
+                                has_trailing_item = true;
                                 break;
                             }
                         }
@@ -576,7 +579,7 @@ where
                 }
             }
 
-            Some(collection)
+            Some((collection, has_trailing_item))
         }
     }
 
