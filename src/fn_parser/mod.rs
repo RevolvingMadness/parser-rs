@@ -814,7 +814,7 @@ where
 
     fn padded<U>(
         mut self,
-        mut p: impl FnParser<'a, Output = Self::Output>,
+        mut p: impl FnParser<'a, Output = U>,
     ) -> impl FnParser<'a, Output = Self::Output> {
         move |input: &mut Stream<'a>| {
             p.parse(input)?;
