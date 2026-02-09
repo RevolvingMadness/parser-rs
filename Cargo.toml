@@ -12,8 +12,8 @@ categories = ["parsing"]
 [dependencies]
 
 [dev-dependencies]
-chumsky = "0.11.2"
-criterion = "0.8.0"
+chumsky = "0.12.0"
+criterion = "0.8.2"
 
 [[bench]]
 name = "choice"
