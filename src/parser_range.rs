@@ -43,6 +43,12 @@ impl From<ParserRange> for Range<usize> {
 }
 
 impl ParserRange {
+    #[inline]
+    #[must_use]
+    pub fn dummy() -> ParserRange {
+        ParserRange { start: 0, end: 0 }
+    }
+
     pub fn into_range(self) -> Range<usize> {
         self.into()
     }
