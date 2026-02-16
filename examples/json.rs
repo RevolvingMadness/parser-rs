@@ -24,9 +24,9 @@ where
     P: FnParser<'a, Output = T> + 'a,
 {
     move |input: &mut Stream<'a>| {
-        let _ = take_while(char::is_whitespace).parse(input)?;
+        take_while(char::is_whitespace).parse(input)?;
         let result = parser.parse(input)?;
-        let _ = take_while(char::is_whitespace).parse(input)?;
+        take_while(char::is_whitespace).parse(input)?;
         Some(result)
     }
 }

@@ -101,21 +101,28 @@ impl<'a> Stream<'a> {
             return;
         }
 
-        let token_range = ParserRange {
-            start,
-            end: self.position,
-        };
+        self.add_syntax(
+            ParserRange {
+                start,
+                end: self.position,
+            },
+            kind,
+        );
+    }
+
+    pub fn add_syntax(&mut self, span: ParserRange, kind: SemanticTokenKind) {
+        if !self.config.semantic_tokens || self.position == span.start {
+            return;
+        }
 
         let should_add = match &self.semantic_tokens_range {
-            Some(request_range) => token_range.overlaps(*request_range),
+            Some(request_range) => span.overlaps(*request_range),
             None => true,
         };
 
         if should_add {
-            self.semantic_tokens.push(SemanticToken {
-                range: token_range,
-                kind,
-            });
+            self.semantic_tokens
+                .push(SemanticToken { range: span, kind });
         }
     }
 

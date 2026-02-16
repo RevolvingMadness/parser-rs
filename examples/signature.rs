@@ -56,7 +56,7 @@ mod signature_tests {
             input.config.max_validation_errors = 10;
             input.signature_help_enabled = true;
 
-            let _ = parser(&mut input);
+            parser(&mut input);
 
             assert_eq!(
                 input.signatures,
@@ -85,7 +85,7 @@ mod signature_tests {
             input.config.max_validation_errors = 10;
             input.signature_help_enabled = true;
 
-            let _ = parser(&mut input);
+            parser(&mut input);
 
             assert_eq!(
                 input.signatures,
@@ -114,7 +114,7 @@ mod signature_tests {
             input.config.max_validation_errors = 10;
             input.signature_help_enabled = true;
 
-            let _ = parser(&mut input);
+            parser(&mut input);
 
             assert_eq!(input.signatures, vec![]);
         }
@@ -127,7 +127,7 @@ mod signature_tests {
             input.config.max_validation_errors = 10;
             input.signature_help_enabled = true;
 
-            let _ = parser(&mut input);
+            parser(&mut input);
 
             assert_eq!(
                 input.signatures,
@@ -148,7 +148,7 @@ mod signature_tests {
             input.config.max_validation_errors = 10;
             input.signature_help_enabled = true;
 
-            let _ = (|input: &mut Stream| {
+            (|input: &mut Stream| {
                 parser.parse(input)?;
                 literal("#").parse(input)?;
                 parser.parse(input)?;
@@ -176,7 +176,7 @@ mod signature_tests {
             input.config.max_validation_errors = 10;
             input.signature_help_enabled = true;
 
-            let _ = parser(&mut input);
+            parser(&mut input);
 
             assert_eq!(
                 input.signatures,
@@ -197,7 +197,7 @@ mod signature_tests {
             input.config.max_validation_errors = 10;
             input.signature_help_enabled = true;
 
-            let _ = parser(&mut input);
+            parser(&mut input);
 
             assert_eq!(
                 input.signatures,
@@ -218,7 +218,7 @@ mod signature_tests {
             input.config.max_validation_errors = 10;
             input.signature_help_enabled = true;
 
-            let _ = parser.parse(&mut input);
+            parser.parse(&mut input);
 
             assert_eq!(
                 input.signatures,
@@ -247,7 +247,7 @@ mod signature_tests {
             input.config.max_validation_errors = 10;
             input.signature_help_enabled = true;
 
-            let _ = parser.separated_by::<_, ()>(char('/')).parse(&mut input);
+            parser.separated_by::<_, ()>(char('/')).parse(&mut input);
 
             assert_eq!(input.signatures, vec![]);
         }
@@ -307,7 +307,7 @@ mod signature_tests {
             input.config.max_validation_errors = 10;
             input.signature_help_enabled = true;
 
-            let _ = complex_parser(&mut input);
+            complex_parser(&mut input);
 
             assert_eq!(
                 input.signatures,
@@ -336,7 +336,7 @@ mod signature_tests {
             input.config.max_validation_errors = 10;
             input.signature_help_enabled = true;
 
-            let _ = complex_parser(&mut input);
+            complex_parser(&mut input);
 
             assert_eq!(
                 input.signatures,
@@ -357,7 +357,7 @@ mod signature_tests {
             input.config.max_validation_errors = 10;
             input.signature_help_enabled = true;
 
-            let _ = complex_parser(&mut input);
+            complex_parser(&mut input);
 
             assert_eq!(
                 input.signatures,
@@ -378,7 +378,7 @@ mod signature_tests {
             input.config.max_validation_errors = 10;
             input.signature_help_enabled = true;
 
-            let _ = complex_parser(&mut input);
+            complex_parser(&mut input);
 
             assert_eq!(
                 input.signatures,
@@ -466,7 +466,7 @@ mod signature_tests {
             input.config.max_validation_errors = 10;
             input.signature_help_enabled = true;
 
-            let _ = parser(&mut input);
+            parser(&mut input);
 
             assert_eq!(
                 input.signatures,
@@ -487,7 +487,7 @@ mod signature_tests {
             input.config.max_validation_errors = 10;
             input.signature_help_enabled = true;
 
-            let _ = parser(&mut input);
+            parser(&mut input);
 
             assert_eq!(
                 input.signatures,
@@ -508,7 +508,7 @@ mod signature_tests {
             input.config.max_validation_errors = 10;
             input.signature_help_enabled = true;
 
-            let _ = parser(&mut input);
+            parser(&mut input);
 
             assert_eq!(
                 input.signatures,

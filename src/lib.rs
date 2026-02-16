@@ -300,7 +300,7 @@ mod tests {
 
         fn parser_whitespace<'a>(input: Stream<'a>) -> ParseResult<&'a str> {
             (|input: &mut Stream| {
-                let r = choice((
+                let result = choice((
                     literal("command1").syntax(SemanticTokenKind::Variable),
                     |input: &mut Stream| {
                         literal("command1")
@@ -314,7 +314,7 @@ mod tests {
 
                 literal(" ").optional().parse(input)?;
 
-                Some(r)
+                Some(result)
             })
             .parse_fully(input)
         }

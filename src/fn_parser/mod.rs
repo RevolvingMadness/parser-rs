@@ -1,11 +1,8 @@
 use std::mem::take;
 
 use crate::{
-    Expectation, ParseError, ParseResult, ParserRange, Signature,
-    accumulate::Accumulate,
-    combinators::end_of_file,
-    semantic_token::{SemanticToken, SemanticTokenKind},
-    stream::Stream,
+    Expectation, ParseError, ParseResult, ParserRange, Signature, accumulate::Accumulate,
+    combinators::end_of_file, semantic_token::SemanticTokenKind, stream::Stream,
 };
 
 pub mod separated_by;
@@ -747,22 +744,13 @@ where
                 return result;
             }
 
-            let token_range = ParserRange {
-                start,
-                end: input.position,
-            };
-
-            let should_add = match &input.semantic_tokens_range {
-                Some(request_range) => token_range.overlaps(*request_range),
-                None => true,
-            };
-
-            if should_add {
-                input.semantic_tokens.push(SemanticToken {
-                    range: token_range,
-                    kind,
-                });
-            }
+            input.add_syntax(
+                ParserRange {
+                    start,
+                    end: input.position,
+                },
+                kind,
+            );
 
             result
         }
