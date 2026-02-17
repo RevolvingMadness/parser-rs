@@ -149,9 +149,9 @@ mod signature_tests {
             input.signature_help_enabled = true;
 
             (|input: &mut Stream| {
-                parser.parse(input)?;
+                parser(input)?;
                 literal("#").parse(input)?;
-                parser.parse(input)?;
+                parser(input)?;
 
                 Some(())
             })

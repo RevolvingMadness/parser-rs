@@ -86,10 +86,10 @@ fn parse_string(input: &mut Stream) -> Option<JsonValue> {
 fn parse_number<'a>(input: &mut Stream<'a>) -> Option<JsonValue> {
     let number_str = (|input: &mut Stream<'a>| {
         char('-').optional().parse(input)?;
-        digits.parse(input)?;
+        digits(input)?;
         (|input: &mut Stream<'a>| {
             char('.').parse(input)?;
-            digits.parse(input)?;
+            digits(input)?;
 
             Some(())
         })
@@ -98,7 +98,7 @@ fn parse_number<'a>(input: &mut Stream<'a>) -> Option<JsonValue> {
         (|input: &mut Stream<'a>| {
             choice((char('e'), char('E'))).parse(input)?;
             choice((char('+'), char('-'))).optional().parse(input)?;
-            digits.parse(input)?;
+            digits(input)?;
 
             Some(())
         })
