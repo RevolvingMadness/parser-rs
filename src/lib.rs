@@ -1,5 +1,6 @@
 use crate::parser_range::ParserRange;
 use crate::semantic_token::SemanticToken;
+use crate::stream::StreamContext;
 use std::fmt::Debug;
 
 pub mod accumulate;
@@ -77,7 +78,7 @@ pub struct Signature {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct Checkpoint {
+pub struct Checkpoint<C: StreamContext = ()> {
     pub position: usize,
     pub suggestions_len: usize,
     pub validation_errors_len: usize,
@@ -86,6 +87,7 @@ pub struct Checkpoint {
     pub signatures_depth: usize,
     pub can_suggest_at_position: bool,
     pub force_suggest_range: Option<ParserRange>,
+    pub context: C::Checkpoint,
 }
 
 #[derive(Debug)]

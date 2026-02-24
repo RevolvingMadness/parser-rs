@@ -11,8 +11,21 @@ pub struct StreamConfig {
     pub signatures: bool,
 }
 
+pub trait StreamContext {
+    type Checkpoint: Clone + Copy;
+
+    fn save(&self) -> Self::Checkpoint;
+    fn restore(&mut self, checkpoint: Self::Checkpoint);
+}
+
+impl StreamContext for () {
+    type Checkpoint = ();
+    fn save(&self) {}
+    fn restore(&mut self, _: Self::Checkpoint) {}
+}
+
 #[derive(Debug)]
-pub struct Stream<'a> {
+pub struct Stream<'a, C: StreamContext = ()> {
     pub input: &'a str,
     pub bytes: &'a [u8],
     pub position: usize,
@@ -28,11 +41,18 @@ pub struct Stream<'a> {
     pub signatures: Vec<Signature>,
     pub signatures_depth: usize,
     pub config: StreamConfig,
+    pub context: C,
 }
 
-impl<'a> Stream<'a> {
-    pub fn new(input: &'a str) -> Self {
-        Self {
+impl<'a> Stream<'a, ()> {
+    pub fn new(input: &'a str) -> Stream<'a> {
+        Stream::new_context(input, ())
+    }
+}
+
+impl<'a, C: StreamContext> Stream<'a, C> {
+    pub fn new_context(input: &'a str, context: C) -> Stream<'a, C> {
+        Stream {
             input,
             bytes: input.as_bytes(),
             position: 0,
@@ -48,11 +68,12 @@ impl<'a> Stream<'a> {
             active_parameter: None,
             signatures_depth: 0,
             config: StreamConfig::default(),
+            context,
         }
     }
 
     #[inline(always)]
-    pub fn checkpoint(&self) -> Checkpoint {
+    pub fn checkpoint(&self) -> Checkpoint<C> {
         Checkpoint {
             position: self.position,
             suggestions_len: self.suggestions.len(),
@@ -62,11 +83,12 @@ impl<'a> Stream<'a> {
             signatures_depth: self.signatures_depth,
             can_suggest_at_position: self.can_suggest_at_position,
             force_suggest_range: self.force_suggest_range,
+            context: self.context.save(),
         }
     }
 
     #[inline(always)]
-    pub fn partial_rollback(&mut self, checkpoint: Checkpoint) {
+    pub fn partial_rollback(&mut self, checkpoint: Checkpoint<C>) {
         self.position = checkpoint.position;
 
         self.validation_errors
@@ -78,10 +100,12 @@ impl<'a> Stream<'a> {
         self.signatures_depth = checkpoint.signatures_depth;
         self.can_suggest_at_position = checkpoint.can_suggest_at_position;
         self.force_suggest_range = checkpoint.force_suggest_range;
+
+        self.context.restore(checkpoint.context);
     }
 
     #[inline(always)]
-    pub fn full_rollback(&mut self, checkpoint: Checkpoint) {
+    pub fn full_rollback(&mut self, checkpoint: Checkpoint<C>) {
         self.position = checkpoint.position;
 
         self.suggestions.truncate(checkpoint.suggestions_len);
@@ -94,6 +118,8 @@ impl<'a> Stream<'a> {
         self.signatures_depth = checkpoint.signatures_depth;
         self.can_suggest_at_position = checkpoint.can_suggest_at_position;
         self.force_suggest_range = checkpoint.force_suggest_range;
+
+        self.context.restore(checkpoint.context);
     }
 
     pub fn add_syntax_from(&mut self, start: usize, kind: SemanticTokenKind) {

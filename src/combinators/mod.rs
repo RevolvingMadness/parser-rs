@@ -1,12 +1,17 @@
 use crate::{
-    Expectation, combinators::take_while::take_while_bytes, fn_parser::FnParser, stream::Stream,
+    Expectation,
+    combinators::take_while::take_while_bytes,
+    fn_parser::FnParser,
+    stream::{Stream, StreamContext},
 };
 
 pub mod choice;
 pub mod take_while;
 
-pub fn literal<'a>(literal: &'static str) -> impl FnParser<'a, Output = &'static str> {
-    move |input: &mut Stream<'a>| {
+pub fn literal<'a, C: StreamContext>(
+    literal: &'static str,
+) -> impl FnParser<'a, C, Output = &'static str> {
+    move |input: &mut Stream<'a, C>| {
         if input.remaining_bytes().starts_with(literal.as_bytes()) {
             input.position += literal.len();
             Some(literal)
@@ -18,8 +23,10 @@ pub fn literal<'a>(literal: &'static str) -> impl FnParser<'a, Output = &'static
     }
 }
 
-pub fn suggest_literal<'a>(literal: &'static str) -> impl FnParser<'a, Output = &'static str> {
-    move |input: &mut Stream<'a>| {
+pub fn suggest_literal<'a, C: StreamContext>(
+    literal: &'static str,
+) -> impl FnParser<'a, C, Output = &'static str> {
+    move |input: &mut Stream<'a, C>| {
         if input.remaining_bytes().starts_with(literal.as_bytes()) {
             input.position += literal.len();
             Some(literal)
@@ -36,8 +43,8 @@ pub fn suggest_literal<'a>(literal: &'static str) -> impl FnParser<'a, Output = 
     }
 }
 
-pub fn char<'a>(expected_char: char) -> impl FnParser<'a, Output = char> {
-    move |input: &mut Stream<'a>| {
+pub fn char<'a, C: StreamContext>(expected_char: char) -> impl FnParser<'a, C, Output = char> {
+    move |input: &mut Stream<'a, C>| {
         if let Some(&char) = input.bytes.get(input.position) {
             if expected_char.is_ascii() {
                 if char == expected_char as u8 {
@@ -73,7 +80,7 @@ pub fn digits<'a>(input: &mut Stream<'a>) -> Option<&'a str> {
     }
 }
 
-pub fn end_of_file(input: &mut Stream) -> Option<()> {
+pub fn end_of_file<C: StreamContext>(input: &mut Stream<C>) -> Option<()> {
     if input.position == input.input.len() {
         Some(())
     } else {
@@ -81,6 +88,6 @@ pub fn end_of_file(input: &mut Stream) -> Option<()> {
     }
 }
 
-pub fn fail<'a, T>(message: &'static str) -> impl FnParser<'a, Output = T> {
-    move |input: &mut Stream<'a>| input.fail_message(message)
+pub fn fail<'a, T, C: StreamContext>(message: &'static str) -> impl FnParser<'a, C, Output = T> {
+    move |input: &mut Stream<'a, C>| input.fail_message(message)
 }

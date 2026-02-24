@@ -1,13 +1,16 @@
 use std::mem::take;
 
 use crate::{
-    Expectation, ParseError, ParseResult, ParserRange, Signature, accumulate::Accumulate,
-    combinators::end_of_file, semantic_token::SemanticTokenKind, stream::Stream,
+    Expectation, ParseError, ParseResult, ParserRange, Signature,
+    accumulate::Accumulate,
+    combinators::end_of_file,
+    semantic_token::SemanticTokenKind,
+    stream::{Stream, StreamContext},
 };
 
 pub mod separated_by;
 
-pub trait FnParser<'a>
+pub trait FnParser<'a, C: StreamContext = ()>
 where
     Self: Sized,
 {
@@ -21,8 +24,8 @@ where
             &'static [(&'static str, Option<&'static str>)],
             Option<&'static str>,
         )],
-    ) -> impl FnParser<'a, Output = Self::Output> {
-        move |input: &mut Stream<'a>| {
+    ) -> impl FnParser<'a, C, Output = Self::Output> {
+        move |input: &mut Stream<'a, C>| {
             if !input.config.signatures {
                 return self.parse(input);
             }
@@ -63,8 +66,8 @@ where
         }
     }
 
-    fn signature(mut self, commit_signature: usize) -> impl FnParser<'a, Output = Self::Output> {
-        move |input: &mut Stream<'a>| {
+    fn signature(mut self, commit_signature: usize) -> impl FnParser<'a, C, Output = Self::Output> {
+        move |input: &mut Stream<'a, C>| {
             if !input.config.signatures {
                 return self.parse(input);
             }
@@ -117,8 +120,8 @@ where
         }
     }
 
-    fn next_signature_parameter(mut self) -> impl FnParser<'a, Output = Self::Output> {
-        move |input: &mut Stream<'a>| {
+    fn next_signature_parameter(mut self) -> impl FnParser<'a, C, Output = Self::Output> {
+        move |input: &mut Stream<'a, C>| {
             if !input.config.signatures {
                 return self.parse(input);
             }
@@ -153,8 +156,8 @@ where
         }
     }
 
-    fn optional(mut self) -> impl FnParser<'a, Output = Option<Self::Output>> {
-        move |input: &mut Stream<'a>| {
+    fn optional(mut self) -> impl FnParser<'a, C, Output = Option<Self::Output>> {
+        move |input: &mut Stream<'a, C>| {
             let checkpoint = input.checkpoint();
 
             match self.parse(input) {
@@ -171,8 +174,8 @@ where
     fn dont_suggest_if(
         &mut self,
         shouldnt_suggest: bool,
-    ) -> impl FnParser<'a, Output = Self::Output> {
-        move |input: &mut Stream<'a>| {
+    ) -> impl FnParser<'a, C, Output = Self::Output> {
+        move |input: &mut Stream<'a, C>| {
             if shouldnt_suggest {
                 let can_suggest_at_position = input.can_suggest_at_position;
                 input.can_suggest_at_position = false;
@@ -188,16 +191,16 @@ where
         }
     }
 
-    fn sliced(mut self) -> impl FnParser<'a, Output = &'a str> {
-        move |input: &mut Stream<'a>| {
+    fn sliced(mut self) -> impl FnParser<'a, C, Output = &'a str> {
+        move |input: &mut Stream<'a, C>| {
             let start = input.position;
 
             self.parse(input).map(|_| input.slice_from(start))
         }
     }
 
-    fn sliced_include(mut self) -> impl FnParser<'a, Output = (&'a str, Self::Output)> {
-        move |input: &mut Stream<'a>| {
+    fn sliced_include(mut self) -> impl FnParser<'a, C, Output = (&'a str, Self::Output)> {
+        move |input: &mut Stream<'a, C>| {
             let start = input.position;
 
             self.parse(input)
@@ -205,8 +208,8 @@ where
         }
     }
 
-    fn spanned(mut self) -> impl FnParser<'a, Output = (ParserRange, Self::Output)> {
-        move |input: &mut Stream<'a>| {
+    fn spanned(mut self) -> impl FnParser<'a, C, Output = (ParserRange, Self::Output)> {
+        move |input: &mut Stream<'a, C>| {
             let start = input.position;
 
             self.parse(input).map(|value| {
@@ -221,12 +224,12 @@ where
         }
     }
 
-    fn many<C>(mut self) -> impl FnParser<'a, Output = C>
+    fn many<Accumulator>(mut self) -> impl FnParser<'a, C, Output = Accumulator>
     where
-        C: Default + Accumulate<Self::Output>,
+        Accumulator: Default + Accumulate<Self::Output>,
     {
-        move |input: &mut Stream<'a>| {
-            let mut collection = C::default();
+        move |input: &mut Stream<'a, C>| {
+            let mut collection = Accumulator::default();
 
             loop {
                 let start = input.position;
@@ -252,14 +255,14 @@ where
         }
     }
 
-    fn many_one<C>(mut self) -> impl FnParser<'a, Output = C>
+    fn many_one<Accumulator>(mut self) -> impl FnParser<'a, C, Output = Accumulator>
     where
-        C: Default + Accumulate<Self::Output>,
+        Accumulator: Default + Accumulate<Self::Output>,
     {
-        move |input: &mut Stream<'a>| {
+        move |input: &mut Stream<'a, C>| {
             let first = self.parse(input)?;
 
-            let mut collection = C::default();
+            let mut collection = Accumulator::default();
             collection.accumulate(first);
 
             loop {
@@ -287,19 +290,23 @@ where
         }
     }
 
-    fn many_range<C>(mut self, min: usize, max: usize) -> impl FnParser<'a, Output = C>
+    fn many_range<Accumulator>(
+        mut self,
+        min: usize,
+        max: usize,
+    ) -> impl FnParser<'a, C, Output = Accumulator>
     where
-        C: Default + Accumulate<Self::Output>,
+        Accumulator: Default + Accumulate<Self::Output>,
     {
-        move |input: &mut Stream<'a>| {
-            let mut collection: Option<C> = None;
+        move |input: &mut Stream<'a, C>| {
+            let mut collection: Option<Accumulator> = None;
             let mut count = 0;
 
             for _ in 0..min {
                 let item = self.parse(input)?;
 
                 if collection.is_none() {
-                    collection = Some(C::default());
+                    collection = Some(Accumulator::default());
                 }
 
                 collection.as_mut().unwrap().accumulate(item);
@@ -311,7 +318,7 @@ where
             }
 
             if collection.is_none() {
-                collection = Some(C::default());
+                collection = Some(Accumulator::default());
             }
 
             loop {
@@ -342,8 +349,8 @@ where
         }
     }
 
-    fn remap(mut self, expected: Expectation) -> impl FnParser<'a, Output = Self::Output> {
-        move |input: &mut Stream<'a>| {
+    fn remap(mut self, expected: Expectation) -> impl FnParser<'a, C, Output = Self::Output> {
+        move |input: &mut Stream<'a, C>| {
             let start_position = input.position;
 
             let pre_parse_error_len = if input.max_error.span.start == start_position {
@@ -367,8 +374,8 @@ where
         }
     }
 
-    fn suggest(mut self, expected: Expectation) -> impl FnParser<'a, Output = Self::Output> {
-        move |input: &mut Stream<'a>| {
+    fn suggest(mut self, expected: Expectation) -> impl FnParser<'a, C, Output = Self::Output> {
+        move |input: &mut Stream<'a, C>| {
             let start_position = input.position;
 
             match self.parse(input) {
@@ -389,8 +396,8 @@ where
     fn remap_multiple(
         mut self,
         expectations: Vec<Expectation>,
-    ) -> impl FnParser<'a, Output = Self::Output> {
-        move |input: &mut Stream<'a>| {
+    ) -> impl FnParser<'a, C, Output = Self::Output> {
+        move |input: &mut Stream<'a, C>| {
             let start_position = input.position;
 
             let pre_parse_error_len = if input.max_error.span.start == start_position {
@@ -420,15 +427,15 @@ where
         }
     }
 
-    fn separated_by<Separator, AccumulatedOutput>(
+    fn separated_by<Separator, Accumulator>(
         mut self,
         mut separator: Separator,
-    ) -> impl FnParser<'a, Output = AccumulatedOutput>
+    ) -> impl FnParser<'a, C, Output = Accumulator>
     where
-        Separator: FnParser<'a>,
-        AccumulatedOutput: Default + Accumulate<Self::Output>,
+        Separator: FnParser<'a, C>,
+        Accumulator: Default + Accumulate<Self::Output>,
     {
-        move |input: &mut Stream<'a>| {
+        move |input: &mut Stream<'a, C>| {
             let start_checkpoint = input.checkpoint();
 
             let first = match self.parse(input) {
@@ -449,11 +456,11 @@ where
 
                     input.suggestions.extend(preserved_suggestions);
 
-                    return Some(AccumulatedOutput::default());
+                    return Some(Accumulator::default());
                 }
             };
 
-            let mut collection = AccumulatedOutput::default();
+            let mut collection = Accumulator::default();
             collection.accumulate(first);
 
             if input.position == start_checkpoint.position {
@@ -497,15 +504,15 @@ where
         }
     }
 
-    fn separated_by_trailing<Separator, AccumulatedOutput>(
+    fn separated_by_trailing<Separator, Accumulator>(
         mut self,
         mut separator: Separator,
-    ) -> impl FnParser<'a, Output = (AccumulatedOutput, bool)>
+    ) -> impl FnParser<'a, C, Output = (Accumulator, bool)>
     where
-        Separator: FnParser<'a>,
-        AccumulatedOutput: Default + Accumulate<Self::Output>,
+        Separator: FnParser<'a, C>,
+        Accumulator: Default + Accumulate<Self::Output>,
     {
-        move |input: &mut Stream<'a>| {
+        move |input: &mut Stream<'a, C>| {
             let start_checkpoint = input.checkpoint();
 
             let first = match self.parse(input) {
@@ -525,11 +532,11 @@ where
                     input.full_rollback(start_checkpoint);
                     input.suggestions.extend(preserved_suggestions);
 
-                    return Some((AccumulatedOutput::default(), false));
+                    return Some((Accumulator::default(), false));
                 }
             };
 
-            let mut collection = AccumulatedOutput::default();
+            let mut collection = Accumulator::default();
             collection.accumulate(first);
 
             if input.position == start_checkpoint.position {
@@ -580,16 +587,16 @@ where
         }
     }
 
-    fn separated_by_one<Separator, AccumulatedOutput>(
+    fn separated_by_one<Separator, Accumulator>(
         mut self,
         mut separator: Separator,
-    ) -> impl FnParser<'a, Output = AccumulatedOutput>
+    ) -> impl FnParser<'a, C, Output = Accumulator>
     where
-        Separator: FnParser<'a>,
-        AccumulatedOutput: Default + Accumulate<Self::Output>,
+        Separator: FnParser<'a, C>,
+        Accumulator: Default + Accumulate<Self::Output>,
     {
-        move |input: &mut Stream<'a>| {
-            let mut collection = AccumulatedOutput::default();
+        move |input: &mut Stream<'a, C>| {
+            let mut collection = Accumulator::default();
 
             let start_checkpoint = input.checkpoint();
 
@@ -639,18 +646,18 @@ where
         }
     }
 
-    fn separated_by_range<Separator, AccumulatedOutput>(
+    fn separated_by_range<Separator, Accumulator>(
         mut self,
         min: usize,
         max: usize,
         mut separator: Separator,
-    ) -> impl FnParser<'a, Output = AccumulatedOutput>
+    ) -> impl FnParser<'a, C, Output = Accumulator>
     where
-        Separator: FnParser<'a>,
-        AccumulatedOutput: Default + Accumulate<Self::Output>,
+        Separator: FnParser<'a, C>,
+        Accumulator: Default + Accumulate<Self::Output>,
     {
-        move |input: &mut Stream<'a>| {
-            let mut collection = AccumulatedOutput::default();
+        move |input: &mut Stream<'a, C>| {
+            let mut collection = Accumulator::default();
             let mut count = 0;
 
             let start_checkpoint = input.checkpoint();
@@ -729,13 +736,13 @@ where
     }
 
     #[inline]
-    fn label(self, label: &'static str) -> impl FnParser<'a, Output = Self::Output> {
+    fn label(self, label: &'static str) -> impl FnParser<'a, C, Output = Self::Output> {
         self.remap(Expectation::Custom(label))
     }
 
     #[must_use]
-    fn syntax(mut self, kind: SemanticTokenKind) -> impl FnParser<'a, Output = Self::Output> {
-        move |input: &mut Stream<'a>| {
+    fn syntax(mut self, kind: SemanticTokenKind) -> impl FnParser<'a, C, Output = Self::Output> {
+        move |input: &mut Stream<'a, C>| {
             let start = input.position;
 
             let result = self.parse(input);
@@ -758,12 +765,15 @@ where
 
     #[inline]
     #[must_use]
-    fn syntax_keyword(self) -> impl FnParser<'a, Output = Self::Output> {
+    fn syntax_keyword(self) -> impl FnParser<'a, C, Output = Self::Output> {
         self.syntax(SemanticTokenKind::Keyword)
     }
 
-    fn on_error(mut self, f: impl Fn(&mut Stream<'a>)) -> impl FnParser<'a, Output = Self::Output> {
-        move |input: &mut Stream<'a>| match self.parse(input) {
+    fn on_error(
+        mut self,
+        f: impl Fn(&mut Stream<'a, C>),
+    ) -> impl FnParser<'a, C, Output = Self::Output> {
+        move |input: &mut Stream<'a, C>| match self.parse(input) {
             Some(value) => Some(value),
             None => {
                 f(input);
@@ -773,8 +783,8 @@ where
         }
     }
 
-    fn map<U>(mut self, mut f: impl FnMut(Self::Output) -> U) -> impl FnParser<'a, Output = U> {
-        move |input: &mut Stream<'a>| {
+    fn map<U>(mut self, mut f: impl FnMut(Self::Output) -> U) -> impl FnParser<'a, C, Output = U> {
+        move |input: &mut Stream<'a, C>| {
             let result = self.parse(input)?;
 
             Some(f(result))
@@ -783,17 +793,17 @@ where
 
     fn map_input<U>(
         mut self,
-        mut f: impl FnMut(&mut Stream, Self::Output) -> U,
-    ) -> impl FnParser<'a, Output = U> {
-        move |input: &mut Stream<'a>| {
+        mut f: impl FnMut(&mut Stream<'a, C>, Self::Output) -> U,
+    ) -> impl FnParser<'a, C, Output = U> {
+        move |input: &mut Stream<'a, C>| {
             let result = self.parse(input)?;
 
             Some(f(input, result))
         }
     }
 
-    fn map_to<U: Clone>(mut self, value: U) -> impl FnParser<'a, Output = U> {
-        move |input: &mut Stream<'a>| {
+    fn map_to<U: Clone>(mut self, value: U) -> impl FnParser<'a, C, Output = U> {
+        move |input: &mut Stream<'a, C>| {
             self.parse(input)?;
 
             Some(value.clone())
@@ -802,9 +812,9 @@ where
 
     fn padded<U>(
         mut self,
-        mut p: impl FnParser<'a, Output = U>,
-    ) -> impl FnParser<'a, Output = Self::Output> {
-        move |input: &mut Stream<'a>| {
+        mut p: impl FnParser<'a, C, Output = U>,
+    ) -> impl FnParser<'a, C, Output = Self::Output> {
+        move |input: &mut Stream<'a, C>| {
             p.parse(input)?;
             let result = self.parse(input)?;
             p.parse(input)?;
@@ -813,8 +823,8 @@ where
         }
     }
 
-    fn peek(mut self) -> impl FnParser<'a, Output = Self::Output> {
-        move |input: &mut Stream<'a>| {
+    fn peek(mut self) -> impl FnParser<'a, C, Output = Self::Output> {
+        move |input: &mut Stream<'a, C>| {
             let partial = input.save_partial();
             match self.parse(input) {
                 Some(val) => {
@@ -831,9 +841,9 @@ where
 
     fn not_followed_by<U>(
         mut self,
-        mut other: impl FnParser<'a, Output = U>,
-    ) -> impl FnParser<'a, Output = Self::Output> {
-        move |input: &mut Stream<'a>| {
+        mut other: impl FnParser<'a, C, Output = U>,
+    ) -> impl FnParser<'a, C, Output = Self::Output> {
+        move |input: &mut Stream<'a, C>| {
             let start = input.position;
             let result = self.parse(input)?;
 
@@ -850,10 +860,10 @@ where
         }
     }
 
-    fn parse(&mut self, input: &mut Stream<'a>) -> Option<Self::Output>;
+    fn parse(&mut self, input: &mut Stream<'a, C>) -> Option<Self::Output>;
 
-    fn parse_fully(&mut self, mut input: Stream<'a>) -> ParseResult<Self::Output> {
-        let result = (|input: &mut Stream<'a>| {
+    fn parse_fully(&mut self, mut input: Stream<'a, C>) -> ParseResult<Self::Output> {
+        let result = (|input: &mut Stream<'a, C>| {
             let result = self.parse(input)?;
 
             end_of_file(input)?;
@@ -882,13 +892,13 @@ where
     }
 }
 
-impl<'a, T, F> FnParser<'a> for F
+impl<'a, T, C: StreamContext, F> FnParser<'a, C> for F
 where
-    F: FnMut(&mut Stream<'a>) -> Option<T>,
+    F: FnMut(&mut Stream<'a, C>) -> Option<T>,
 {
     type Output = T;
 
-    fn parse(&mut self, input: &mut Stream<'a>) -> Option<Self::Output> {
+    fn parse(&mut self, input: &mut Stream<'a, C>) -> Option<Self::Output> {
         self(input)
     }
 }
